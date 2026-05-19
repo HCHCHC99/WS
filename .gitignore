@@ -1,55 +1,47 @@
-# Prerequisites
-*.d
+# Keil MDK build output
+template/MDK/output/
+*.dep
+*.uvgui*
+*.uvguix*
+JLinkLog.txt
+*.Administrator
+*.CrApplication
+*.D99
 
-# Object files
+# Compiled objects
 *.o
-*.ko
 *.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
+*.axf
 *.hex
+*.bin
+*.elf
+*.out
+*.lst
+*.map
+*.d
+*.crf
+*.htm
+*.lnp
+*.plg
+*.iex
+*.bak
+*.sct
+*.scvd
+*.tra
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
+# RTE
+RTE/
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# JLink
+JLink*
 
-# debug information files
-*.dwo
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
