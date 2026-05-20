@@ -214,14 +214,14 @@ void Comm_HAL_Init(const RS485_HW_Config_t *hw_cfg, const Comm_HAL_Config_t *hal
     m_bTxIdle = true;
     m_u32LastRxTick = tickTimer_GetCount();
 
-    /* Register callbacks with RS485 hardware layer */
+    /* Initialize hardware first (clears callbacks internally) */
+    RS485_HW_Init(hw_cfg);
+
+    /* Register callbacks AFTER RS485_HW_Init() so they aren't nullified */
     RS485_HW_RegisterRxCallback(HAL_RxCallback);
     RS485_HW_RegisterTxReadyCallback(HAL_TxReadyCallback);
     RS485_HW_RegisterTxCompleteCallback(HAL_TxCompleteCallback);
     RS485_HW_RegisterErrorCallback(HAL_ErrorCallback);
-
-    /* Initialize hardware */
-    RS485_HW_Init(hw_cfg);
 
     HAL_DEBUG("Init done, baud=%lu, frame_timeout=%dms", hw_cfg->baudrate, m_u8FrameTimeoutMs);
 }
