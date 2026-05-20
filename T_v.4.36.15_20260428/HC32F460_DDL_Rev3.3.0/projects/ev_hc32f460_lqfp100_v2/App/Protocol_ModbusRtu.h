@@ -110,12 +110,14 @@ typedef struct {
  *============================================================================*/
 typedef bool (*ModbusRTU_ReadRegCallback_t)(uint16_t reg_addr, uint16_t *value);
 typedef bool (*ModbusRTU_WriteRegCallback_t)(uint16_t reg_addr, uint16_t value);
+typedef bool (*ModbusRTU_WriteMultiCallback_t)(uint16_t startReg, uint16_t regCount, const uint8_t *pData);
 typedef bool (*ModbusRTU_ValidateRegCallback_t)(uint16_t reg_addr);
 
 typedef struct {
-    ModbusRTU_ReadRegCallback_t     on_read;
-    ModbusRTU_WriteRegCallback_t    on_write;
-    ModbusRTU_ValidateRegCallback_t on_validate;
+    ModbusRTU_ReadRegCallback_t      on_read;
+    ModbusRTU_WriteRegCallback_t     on_write;
+    ModbusRTU_WriteMultiCallback_t   on_write_multi; /* NULL = fallback to per-register on_write */
+    ModbusRTU_ValidateRegCallback_t  on_validate;
 } ModbusRTU_Callbacks_t;
 
 /*=============================================================================

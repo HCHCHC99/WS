@@ -210,17 +210,29 @@ static void ModbusRTU_HandleWriteMulti(uint8_t addr, uint16_t startReg, uint16_t
         }
     }
 
-    /* Write all registers */
-    for (i = 0U; i < regCount; i++)
+    /* Write all registers — prefer batch callback for atomic Flash save */
+    if (m_stcCallbacks.on_write_multi)
     {
-        regAddr  = startReg + i;
-        regValue = (uint16_t)((pData[i * 2U] << 8U) | pData[i * 2U + 1U]);
-
-        if (m_stcCallbacks.on_write && !m_stcCallbacks.on_write(regAddr, regValue))
+        if (!m_stcCallbacks.on_write_multi(startReg, regCount, pData))
         {
-            MODBUS_PARSE_DBG("  on_write failed: reg=0x%04X", regAddr);
+            MODBUS_PARSE_DBG("  on_write_multi failed");
             ModbusRTU_SendException(addr, MODBUS_FUNC_WRITE_MULTI, MODBUS_EXCEPTION_SLAVE_DEVICE_FAIL);
             return;
+        }
+    }
+    else
+    {
+        for (i = 0U; i < regCount; i++)
+        {
+            regAddr  = startReg + i;
+            regValue = (uint16_t)((pData[i * 2U] << 8U) | pData[i * 2U + 1U]);
+
+            if (m_stcCallbacks.on_write && !m_stcCallbacks.on_write(regAddr, regValue))
+            {
+                MODBUS_PARSE_DBG("  on_write failed: reg=0x%04X", regAddr);
+                ModbusRTU_SendException(addr, MODBUS_FUNC_WRITE_MULTI, MODBUS_EXCEPTION_SLAVE_DEVICE_FAIL);
+                return;
+            }
         }
     }
 

@@ -15,8 +15,8 @@ Usage:
 # Device address
 NODE_ID = 1
 
-# Operation: "READ" or "WRITE" or "CLEAR_FAULT" or "CTRL_CMD"
-OPERATION = "CTRL_CMD"
+# Operation: "READ" or "WRITE" or "WRITE_MULTI" or "CLEAR_FAULT" or "CTRL_CMD"
+OPERATION = "WRITE_MULTI"
 
 # Register address (hex) - only for READ/WRITE
 REG_ADDR = 0x2737   # REG_CTRL_CMD
@@ -38,6 +38,31 @@ CTRL_CMD_VALUE = 0x0008
 #   0x0040 = Undervoltage(FAULT_BIT_UNDERVOLTAGE)
 #   0x0000 = Clear all faults
 CLEAR_FAULT_BITS = 0x0000   # default: clear undervoltage
+
+# ===== Multi-register write config (only for OPERATION = "WRITE_MULTI") =====
+# Format: [register_addr, value]
+# Uncomment the lines you need and fill in the values, then run the script.
+# REG_CTRL_CMD (0x2720) and REG_FAULT_STATUS (0x2740) use single-write (WRITE).
+# All values written to RAM first, then saved to Flash once (one erase only).
+#
+# ===== User parameters (Modbus registers, stored in Flash) =====
+#  [0x2710, 1   ],   # REG_NODE_ID              1~247
+#  [0x2711, 0   ],   # REG_TARGET_SPEED         r/min (int16)
+#  [0x2712, 0   ],   # REG_TARGET_ANGLE         0.1 deg (int16)
+#  [0x2714, 270 ],   # REG_VOLTAGE_UPPER_LIMIT  0.1V (uint16)
+#  [0x2715, 210 ],   # REG_VOLTAGE_LOWER_LIMIT  0.1V (uint16)
+#  [0x2716, 5000],   # REG_CURRENT_UPPER_LIMIT  mA (uint16)
+#  [0x271C, -20 ],   # REG_CLOSE_LIMIT_ANGLE    0.1 deg (int16)
+#  [0x271D, 880 ],   # REG_OPEN_LIMIT_ANGLE     0.1 deg (int16)
+#  [0x271E, 20  ],   # REG_CURRENT_DETECT_MS    ms (uint16)
+#
+# Note: registers must be contiguous (Modbus 0x10 requirement).
+#       The script will check and report an error if they are not.
+MULTI_WRITE_REGS = [
+      [0x2714, 280],   # REG_VOLTAGE_UPPER_LIMIT  0.1V
+      [0x2715, 200],   # REG_VOLTAGE_LOWER_LIMIT  0.1V
+      [0x2716, 3000],  # REG_CURRENT_UPPER_LIMIT  mA
+]
 
 # ===== REG_CTRL_CMD (0x2720) config (only for OPERATION = "CTRL_CMD") =====
 # Bit definition:
@@ -139,6 +164,10 @@ elif OPERATION == "WRITE":
 elif OPERATION == "CLEAR_FAULT":
     print(f"Fault reg:   0x2740 (REG_FAULT_STATUS)")
     print(f"Clear bits:  0x{CLEAR_FAULT_BITS:04X} -> {describe_fault_bits(CLEAR_FAULT_BITS)}")
+elif OPERATION == "WRITE_MULTI":
+    print(f"Reg count:   {len(MULTI_WRITE_REGS)}")
+    for reg, val in MULTI_WRITE_REGS:
+        print(f"  0x{reg:04X} <- {val} (0x{to_u16(val):04X})")
 print("=" * 50)
 
 if OPERATION == "READ":
@@ -170,6 +199,42 @@ elif OPERATION == "CLEAR_FAULT":
     print(f"    -> Voltage_Device_ClearAlarm() + Motor_ClearVoltageBlock()")
     print(f"    -> RealTime_ClearFault(0x{val:04X})")
 
+elif OPERATION == "WRITE_MULTI":
+    if not MULTI_WRITE_REGS:
+        print("\nError: MULTI_WRITE_REGS is empty, uncomment some [reg, value] entries")
+    else:
+        start_reg = MULTI_WRITE_REGS[0][0]
+        reg_count = len(MULTI_WRITE_REGS)
+        byte_count = reg_count * 2
+
+        # Build data bytes in register order
+        data_bytes = []
+        for i, (reg, val) in enumerate(MULTI_WRITE_REGS):
+            # Verify contiguous (Modbus 0x10 requires it)
+            if reg != start_reg + i:
+                print(f"\nError: registers must be contiguous. "
+                      f"Expected 0x{start_reg + i:04X}, got 0x{reg:04X}")
+                data_bytes = None
+                break
+            v = to_u16(val)
+            data_bytes.append((v >> 8) & 0xFF)
+            data_bytes.append(v & 0xFF)
+
+        if data_bytes is not None:
+            cmd = make_frame([NODE_ID, 0x10,
+                              (start_reg >> 8) & 0xFF, start_reg & 0xFF,
+                              (reg_count >> 8) & 0xFF, reg_count & 0xFF,
+                              byte_count] + data_bytes)
+            print(f"\nSend: {cmd}")
+            print(f"Resp: {NODE_ID:02X} 10 {start_reg >> 8:02X} {start_reg & 0xFF:02X} "
+                  f"{reg_count >> 8:02X} {reg_count & 0xFF:02X} CRC")
+            print(f"")
+            print(f"  Call chain:")
+            print(f"    ModbusRTU_HandleWriteMulti({reg_count} regs)")
+            print(f"    -> App_Comm_OnWriteMulti()")
+            print(f"       -> Param_WriteByReg() x {reg_count} (RAM)")
+            print(f"       -> Param_Save() x 1 (Flash, one erase only)")
+
 elif OPERATION == "CTRL_CMD":
     # Write REG_CTRL_CMD (0x2720) with control command value
     val = CTRL_CMD_VALUE
@@ -200,6 +265,6 @@ elif OPERATION == "CTRL_CMD":
 
 else:
     print(f"\nError: unknown OPERATION '{OPERATION}', "
-          f"use READ, WRITE, CLEAR_FAULT or CTRL_CMD")
+          f"use READ, WRITE, WRITE_MULTI, CLEAR_FAULT or CTRL_CMD")
 
 input()

@@ -194,6 +194,53 @@ static bool App_Comm_OnWriteReg(uint16_t reg_addr, uint16_t value)
 }
 
 /*=============================================================================
+ * Batch write callback — called by ModbusRTU for 0x10 multi-register writes.
+ * Writes all registers to RAM first, then persists to Flash once.
+ *============================================================================*/
+static bool App_Comm_OnWriteMulti(uint16_t startReg, uint16_t regCount, const uint8_t *pData)
+{
+    uint16_t i;
+    uint16_t regAddr;
+    uint16_t regValue;
+
+    COMM_DBG("write multi: start=0x%04X, count=%d", startReg, (int)regCount);
+
+    /* Special registers must be written individually (0x06), not batched */
+    for (i = 0U; i < regCount; i++)
+    {
+        regAddr = startReg + i;
+        if (regAddr == REG_CTRL_CMD || regAddr == REG_FAULT_STATUS)
+        {
+            COMM_DBG("  reg 0x%04X requires single-write (0x06)", regAddr);
+            return false;
+        }
+    }
+
+    /* Phase 1: write all to RAM */
+    for (i = 0U; i < regCount; i++)
+    {
+        regAddr  = startReg + i;
+        regValue = (uint16_t)((pData[i * 2U] << 8U) | pData[i * 2U + 1U]);
+
+        if (Param_WriteByReg(regAddr, regValue) != PARAM_OK)
+        {
+            COMM_DBG("  Param_WriteByReg failed: reg=0x%04X", regAddr);
+            return false;
+        }
+    }
+
+    /* Phase 2: persist to Flash once for the entire batch */
+    if (Param_Save(&m_stcParamConfig) != PARAM_OK)
+    {
+        COMM_DBG("  Param_Save failed");
+        return false;
+    }
+
+    COMM_DBG("write multi OK, %d regs saved to Flash", (int)regCount);
+    return true;
+}
+
+/*=============================================================================
  * Handle control commands from REG_CTRL_CMD
  *============================================================================*/
 static void App_Comm_HandleCtrlCmd(uint16_t cmd)
@@ -332,9 +379,10 @@ void App_Comm_Init(const App_Comm_Config_t *cfg)
     protoCfg.enable_write_multi = cfg->proto.enable_write_multi;
 
     ModbusRTU_Callbacks_t cbs;
-    cbs.on_read     = App_Comm_OnReadReg;
-    cbs.on_write    = App_Comm_OnWriteReg;
-    cbs.on_validate = App_Comm_OnValidateReg;
+    cbs.on_read       = App_Comm_OnReadReg;
+    cbs.on_write      = App_Comm_OnWriteReg;
+    cbs.on_write_multi = App_Comm_OnWriteMulti;
+    cbs.on_validate   = App_Comm_OnValidateReg;
 
     ModbusRTU_Init(&protoCfg, &cbs);
 
