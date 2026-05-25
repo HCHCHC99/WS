@@ -113,7 +113,7 @@
 #define HALL_IRQ_SRC_B          INT_SRC_PORT_EIRQ9
 #if MOTOR_HALL_TRIPLE_ENABLE
 #define HALL_EIRQ_CH_C          EXTINT_CH08
-#define HALL_IRQN_C             INT_008_IRQn
+#define HALL_IRQN_C             INT008_IRQn
 #define HALL_IRQ_SRC_C          INT_SRC_PORT_EIRQ8
 #endif
 #define HALL_IRQ_PRIORITY       (2)
