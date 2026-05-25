@@ -104,6 +104,95 @@ Typical sequence: START (0x0001) → FWD (0x0011) → STOP (0x0002)
 - Realtime data (`g_RealTimeData`) is RAM-only, **not persisted to Flash** — lost on power cycle
 - Multi-register writes (0x10) reject batches that include `REG_CTRL_CMD` or `REG_FAULT_STATUS` — those must use single writes (0x06)
 
+## BLDC Motor Control — TMR4 Six-Step Commutation
+
+The motor control layer uses TMR4 timer (CM_TMR4_1) for six-step block commutation. This replaced the original TMRA_4 edge-aligned PWM. TMR4 provides 6 complementary output channels (UH/UL, VH/VL, WH/WL) on PB4-PB9 with dead-time insertion.
+
+### Mode Selection Macros (`App_Motor_Project.h`)
+
+| Macro | Default | Description |
+|-------|---------|-------------|
+| `MOTOR_HALL_TRIPLE_ENABLE` | `0` (in `motor_hall.h`) | `0` = dual Hall (PA9, PA10), `1` = triple Hall (PA8, PA9, PA10). Gates all Hall C code and commutation path |
+| `MOTOR_COMMUTATION_SENSORLESS` | `0` | `0` = Hall-dependent commutation, `1` = open-loop timed commutation. Only active when `MOTOR_HALL_TRIPLE_ENABLE=1` |
+| `ENABLE_SIMULATION_MODE` | `1` | Simulation mode (no physical hardware needed) |
+
+**Three compilation paths** controlled by these macros:
+
+```
+MOTOR_HALL_TRIPLE_ENABLE=0:  Original TMRA_4 PWM (PWM_Update + Motor_RampForward/Reverse)
+MOTOR_HALL_TRIPLE_ENABLE=1 + MOTOR_COMMUTATION_SENSORLESS=0:  TMR4 + Hall GPIO read (PA8/9/10)
+MOTOR_HALL_TRIPLE_ENABLE=1 + MOTOR_COMMUTATION_SENSORLESS=1:  TMR4 + timed step advance (open-loop)
+```
+
+### Open-Loop Timing Config
+
+When `MOTOR_COMMUTATION_SENSORLESS=1`, commutation step interval scales linearly with duty cycle:
+- `COMM_STEP_INTERVAL_MIN_US` (800us) → used at 100% duty (fastest)
+- `COMM_STEP_INTERVAL_MAX_US` (5000us) → used at 0% duty (slowest)
+- Interval = MAX_US/1000 - ((MAX_US - MIN_US)/1000) * duty / 100 (in ms ticks)
+
+### Key Files
+
+| File | Role |
+|------|------|
+| `Adp/Template_tmr4_pwm.c/h` | TMR4 PWM config + six-step commutation tables + open-loop step advance |
+| `Adp/Motor_hall.c/h` | Hall sensor driver: GPIO interrupts on PA8/9/10, RPM/direction calculation |
+| `Dev/dev_motor_hall.c/h` | Device-layer wrapper for Hall sensor, `MotorHall_Device_t` struct |
+| `Dev/dev_motor.c` | Motor arbitrator: `Motor_Update()` dispatches to TMR4 or TMRA based on macros |
+| `App/App_Motor_Project.c/h` | Hardware pin definitions, device registration, simulation data |
+
+### Commutation Tables (`Template_tmr4_pwm.c`)
+
+Forward sequence (hall_state order): **5→4→6→2→3→1**
+```
+Hall 101(5): U→W    Hall 100(4): U→V    Hall 110(6): W→V
+Hall 010(2): W→U    Hall 011(3): V→U    Hall 001(1): V→W
+```
+
+Reverse sequence (hall_state order): **1→3→2→6→4→5** (reversed pairs)
+
+Open-loop `TMR4_PWM_CommutationNextStep(direction)` advances through a step index (0-5) and maps to the corresponding hall_state to reuse the same `TMR4_PWM_CommutationStep()` function.
+
+### TMR4 API Summary
+
+```c
+void TMR4_PWM_Config(void);                          // Init TMR4, GPIOs, dead-time
+void TMR4_PWM_StartOutput(void);                     // Enable all 6 channels
+void TMR4_PWM_StopOutput(void);                      // Disable all outputs
+void TMR4_PWM_EmergencyStop(void);                   // Immediate all-off
+void TMR4_PWM_CommutationStep(hall_state, dir);      // Set one commutation sector
+void TMR4_PWM_SetCommutationDuty(uint16_t duty);      // duty 0-10000 (0.00%-100.00%)
+void TMR4_PWM_CommutationStop(void);                  // Clear all, reset state
+void TMR4_PWM_CommutationNextStep(uint8_t dir);       // Open-loop: advance to next step
+void TMR4_PWM_CommutationResetSequence(void);         // Open-loop: reset step index
+```
+
+### Hall Sensor IRQ Names (HC32F460)
+
+Correct interrupt names (no underscore between INT and number):
+- `INT008_IRQn` for PA8 (EXTINT_CH08)
+- `INT009_IRQn` for PA9 (EXTINT_CH09)
+- `INT010_IRQn` for PA10 (EXTINT_CH10)
+
+### Known Limitations
+
+- **Dual Hall fallback is broken**: When `MOTOR_HALL_TRIPLE_ENABLE=0`, `Motor_OnArbitrationFwd/Rev` still call `Motor_RampForward/Reverse`, but the TMRA path in `Motor_Update` remains functional via `#else` blocks. The callbacks are wrapped in `#if MOTOR_HALL_TRIPLE_ENABLE` / `#else` preserving both paths.
+- **Hall state 000/111**: When Hall sensors fail (all high or all low), commutation is skipped (guarded by `hall_state >= 1 && hall_state <= 6`).
+- **File encoding**: Source files use GBK encoding for Chinese comments. When using regex tools, match on ASCII portions only.
+
+### Session Change Summary (2026-05-26)
+
+Uncommitted changes vs HEAD (`55bd302`):
+
+| File | Changes |
+|------|---------|
+| `Adp/Template_tmr4_pwm.c` | Added `s_u8OpenLoopStepIndex`, `s_au8StepToHallFwd[6]`, `s_au8StepToHallRev[6]`, `TMR4_PWM_CommutationNextStep()`, `TMR4_PWM_CommutationResetSequence()`. `TMR4_PWM_CommutationStop()` also resets step index |
+| `Adp/Template_tmr4_pwm.h` | Added `TMR4_PWM_CommutationNextStep()` and `TMR4_PWM_CommutationResetSequence()` prototypes |
+| `App/App_Motor_Project.h` | Added `MOTOR_COMMUTATION_SENSORLESS` (default 0), `COMM_STEP_INTERVAL_MIN_US` (800), `COMM_STEP_INTERVAL_MAX_US` (5000) |
+| `Dev/dev_motor.c` | Added `s_u32LastCommStepTime`, `s_u8CommDirCache` tracking variables. `Motor_Update()` now has 3-way branch: open-loop timed / Hall GPIO / original TMRA. `Motor_Init()` TMRA register sync wrapped in `#if !MOTOR_HALL_TRIPLE_ENABLE` |
+
+Previously committed (`55bd302`): Triple Hall support in `Motor_hall.c/h`, `dev_motor_hall.c/h`; TMR4 six-step commutation tables and `TMR4_PWM_CommutationStep()`; Hall C pin/IRQ definitions in `App_Motor_Project.c/h`.
+
 ## Documentation
 
 - `T_v.4.36.15_20260428/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
