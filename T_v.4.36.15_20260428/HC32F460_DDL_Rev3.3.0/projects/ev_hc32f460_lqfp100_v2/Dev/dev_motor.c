@@ -1,3 +1,4 @@
+Done
 #include "dev_motor.h"
 #include "dev_pwm.h"          // PWM设备层
 #include "dev_voltage.h"      // 电压告警事件类型
@@ -7,15 +8,21 @@
 #include <string.h>
 #include "rtt_log.h"
 #include "dev_rturn.h"          // 添加这行，用于 RTurn_LimitEvent_t
-#include "Template_Pwm.h"       // PWM配置（TMRA_4, PB6/PB7）
-#include "hc32_ll_tmra.h"      // TMRA寄存器操作
-#include "Pwm.h"                // PWM驱动
+#include "Template_tmr4_pwm.h"   // TMR4 6-way complementary PWM + six-step commutation
+#include "Motor_hall.h"          // hall direction enum
+#if !MOTOR_HALL_TRIPLE_ENABLE
+#include "Template_Pwm.h"
+#include "hc32_ll_tmra.h"
+#include "Pwm.h"
+#endif
 
 // 引用 main.c 中定义的PWM实例
+#if !MOTOR_HALL_TRIPLE_ENABLE
 extern pwm_t g_motor_pwm_ch1;
 extern pwm_t g_motor_pwm_ch2;
 extern pwm_t g_motor_pwm_ch3;
 extern pwm_t g_motor_pwm_ch4;
+#endif
 // 在文件开头，其他静态变量定义附近添加
 
 static MotorDir_t s_eLastArbitrationDir = DIR_NONE;  // 上次仲裁的方向
@@ -299,83 +306,56 @@ static void Motor_RunReverseImmediate(uint16_t duty) {
 // ========== 电机仲裁结果回调函数（弱定义，用户可重写） ==========
 //    GPIO_SET(PHU_PORT, PHU_PIN);
 //    GPIO_SET(PHV_PORT, PHV_PIN);
+
 __weak void Motor_OnArbitrationStop(MotorDevice_t* motor) {
     (void)motor;
-    
-    // 检查是否需要执行停止
-    // 修改：s_eLastArbitrationDir != DIR_NONE 或者 这是第一次停止（需要初始化停止状态）
-    static bool s_bFirstStop = true;
-    
-    if (s_eLastArbitrationDir != DIR_NONE || s_bFirstStop) {
-        // 获取当前占空比
-        uint16_t current_duty_ch1 = PWM_GetDuty(&g_motor_pwm_ch1);
-        
-        MAIN_D("[MOTOR_ARB] Stop: from dir=%d, current duty=%d%%, first_stop=%d\r\n", 
-               s_eLastArbitrationDir, current_duty_ch1, s_bFirstStop);
-        
-        if (s_bFirstStop) {
-            // 第一次停止：直接设置停止极性和50%占空比，不缓启动
-            Motor_SetStopDuty();
-            s_bFirstStop = false;
-            MAIN_D("[MOTOR_ARB] First stop: set stop polarity and 50%% duty directly\r\n");
-        } else {
-            // 后续停止：使用缓启动
-            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch1, current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
-            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch2, current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
-            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
-            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
-            
-            // 标记需要切换停止极性（缓停完成后切换）
-            s_bStopPolarityPending = true;
-        }
-        
-        // 更新方向记录
-        s_eLastArbitrationDir = DIR_NONE;
-        s_u16LastTargetDuty = 0;
-    }
-    
+
+    TMR4_PWM_CommutationStop();
+    s_eLastArbitrationDir = DIR_NONE;
+    s_u16LastTargetDuty = 0;
     motor_state = 0;
+
+    MAIN_D("[MOTOR_ARB] Stop: TMR4 commutation stopped
+");
 }
 
 
     // GPIO_SET(PHU_PORT, PHU_PIN);
     // GPIO_RESET(PHV_PORT, PHV_PIN);
+ 
 __weak void Motor_OnArbitrationFwd(MotorDevice_t* motor, float duty) {
     (void)motor;
     uint16_t duty_percent = (uint16_t)(duty);
-    
-    // 检查是否需要执行缓启动
-    if (s_eLastArbitrationDir != DIR_FWD || s_u16LastTargetDuty != duty_percent) {
-        // 清除待处理的停止极性切换标志
-        s_bStopPolarityPending = false;
-        
-        MAIN_D("[MOTOR_ARB] FWD: start ramp...\r\n");
-        Motor_RampForward(duty_percent);
-        
-        s_eLastArbitrationDir = DIR_FWD;
-        s_u16LastTargetDuty = duty_percent;
-    }
+    if (duty_percent < 2) duty_percent = 2;
+    if (duty_percent > 98) duty_percent = 98;
+
+    TMR4_PWM_SetCommutationDuty(duty_percent * 100U);
+
+    s_eLastArbitrationDir = DIR_FWD;
+    s_u16LastTargetDuty = duty_percent;
     motor_state = 1;
+
+    MAIN_D("[MOTOR_ARB] FWD: TMR4 commutation, duty=%d%%
+", duty_percent);
 }
 
 //    GPIO_SET(PHV_PORT, PHV_PIN);
 //    GPIO_RESET(PHU_PORT, PHU_PIN);
+
 __weak void Motor_OnArbitrationRev(MotorDevice_t* motor, float duty) {
     (void)motor;
     uint16_t duty_percent = (uint16_t)(duty);
-    
-    // 检查是否需要执行缓启动
-    if (s_eLastArbitrationDir != DIR_REV || s_u16LastTargetDuty != duty_percent) {
-        // 清除待处理的停止极性切换标志
-        s_bStopPolarityPending = false;
-        
-        MAIN_D("[MOTOR_ARB] REV: start ramp...\r\n");
-        Motor_RampReverse(duty_percent);
-        
-        s_eLastArbitrationDir = DIR_REV;
-        s_u16LastTargetDuty = duty_percent;
-    }
+    if (duty_percent < 2) duty_percent = 2;
+    if (duty_percent > 98) duty_percent = 98;
+
+    TMR4_PWM_SetCommutationDuty(duty_percent * 100U);
+
+    s_eLastArbitrationDir = DIR_REV;
+    s_u16LastTargetDuty = duty_percent;
     motor_state = 2;
+
+    MAIN_D("[MOTOR_ARB] REV: TMR4 commutation, duty=%d%%
+", duty_percent);
 }
 
 // ========== 内部函数声明 ==========
@@ -1158,6 +1138,7 @@ DeviceResult_t Motor_Init(void* handle) {
     Motor_UpdateDebugInfo(motor);
 
     // ========== 关键修复：同步硬件实际占空比到PWM结构体 ==========
+#if !MOTOR_HALL_TRIPLE_ENABLE
     uint32_t period = TMRA_GetPeriodValue(CM_TMRA_4);
     if (period > 0) {
         uint32_t cmp1 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH1);
@@ -1180,6 +1161,7 @@ DeviceResult_t Motor_Init(void* handle) {
                duty1, duty2, duty3, duty4);
     }
     
+#endif
     MOTOR_DEBUG("Motor_Init completed, g_pMotor_Dev_Watch set\r\n");
     return RESULT_OK;
 }
@@ -1277,25 +1259,36 @@ DeviceResult_t Motor_Update(void* handle) {
     uint32_t now = tickTimer_GetCount();
 
     // ========== 新增：更新所有PWM通道的缓启动状态 ==========
+#if MOTOR_HALL_TRIPLE_ENABLE
+    /* Hall-based six-step commutation */
+    if (s_eLastArbitrationDir != DIR_NONE) {
+        uint8_t hall_a = (GPIO_ReadInputPins(GPIO_PORT_A, GPIO_PIN_10) == PIN_SET) ? 1 : 0;
+        uint8_t hall_b = (GPIO_ReadInputPins(GPIO_PORT_A, GPIO_PIN_09) == PIN_SET) ? 1 : 0;
+        uint8_t hall_c = (GPIO_ReadInputPins(GPIO_PORT_A, GPIO_PIN_08) == PIN_SET) ? 1 : 0;
+        uint8_t hall_state = (hall_c << 2) | (hall_b << 1) | hall_a;
+        if (hall_state >= 1 && hall_state <= 6) {
+            uint8_t dir = (s_eLastArbitrationDir == DIR_FWD) ? 1 : 2;
+            TMR4_PWM_CommutationStep(hall_state, dir);
+        }
+    }
+#else
     PWM_Update(&g_motor_pwm_ch1);
     PWM_Update(&g_motor_pwm_ch2);
     PWM_Update(&g_motor_pwm_ch3);
     PWM_Update(&g_motor_pwm_ch4);
 
-    // ========== 新增：检查缓停是否完成，需要切换停止极性 ==========
     if (s_bStopPolarityPending) {
-        // 检查所有通道是否都完成了缓启动（状态为IDLE）
         if (PWM_GetState(&g_motor_pwm_ch1) == PWM_STATE_IDLE &&
             PWM_GetState(&g_motor_pwm_ch2) == PWM_STATE_IDLE &&
             PWM_GetState(&g_motor_pwm_ch3) == PWM_STATE_IDLE &&
             PWM_GetState(&g_motor_pwm_ch4) == PWM_STATE_IDLE) {
-            
-            // 缓停完成，切换到停止极性
             Motor_SetStopDuty();
             s_bStopPolarityPending = false;
-            MAIN_D("[MOTOR] Stop ramp complete, switched to stop polarity\r\n");
+            MAIN_D("[MOTOR] Stop ramp complete\r\n");
         }
     }
+#endif
+
 
     // 每50ms仲裁一次
     if (now - motor->last_arbitration_time >= 50) {
