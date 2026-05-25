@@ -375,6 +375,7 @@ static const tmr4_comm_step_t s_comm_rev[8] = {
 static uint16_t s_u16CommutationDuty;   /* current commutation duty 0..10000 */
 static uint8_t  s_u8LastHallState;      /* last hall state for change detection */
 static uint8_t  s_u8LastDirection;      /* last direction */
+static uint8_t  s_u8OpenLoopStepIndex;  /* current step index 0..5 for open-loop */
 
 /* All OC channels in order for easy iteration */
 static const uint32_t s_au32AllOcChannels[6] = {
@@ -450,4 +451,49 @@ void TMR4_PWM_CommutationStop(void)
     TMR4_PWM_ClearAllCompareValues();
     s_u8LastHallState = 0;
     s_u8LastDirection = 0;
+    s_u8OpenLoopStepIndex = 0;
+}
+
+/*******************************************************************************
+ * Open-loop (sensorless) commutation: advance to the next step in sequence
+ *
+ * Forward sequence: hall_states 5,4,6,2,3,1
+ * Reverse sequence: hall_states 1,3,2,6,4,5
+ ******************************************************************************/
+
+/* Step index -> hall_state mapping for forward direction */
+static const uint8_t s_au8StepToHallFwd[6] = { 5, 4, 6, 2, 3, 1 };
+
+/* Step index -> hall_state mapping for reverse direction */
+static const uint8_t s_au8StepToHallRev[6] = { 1, 3, 2, 6, 4, 5 };
+
+void TMR4_PWM_CommutationResetSequence(void)
+{
+    s_u8OpenLoopStepIndex = 0;
+    s_u8LastHallState = 0;
+    s_u8LastDirection = 0;
+}
+
+void TMR4_PWM_CommutationNextStep(uint8_t direction)
+{
+    uint8_t hall_state;
+    const uint8_t *seq;
+
+    if (direction == 1) {
+        seq = s_au8StepToHallFwd;
+    } else if (direction == 2) {
+        seq = s_au8StepToHallRev;
+    } else {
+        TMR4_PWM_CommutationStop();
+        return;
+    }
+
+    /* Advance step index (wrap 0..5) */
+    s_u8OpenLoopStepIndex++;
+    if (s_u8OpenLoopStepIndex >= 6) {
+        s_u8OpenLoopStepIndex = 0;
+    }
+
+    hall_state = seq[s_u8OpenLoopStepIndex];
+    TMR4_PWM_CommutationStep(hall_state, direction);
 }

@@ -65,4 +65,8 @@ void TMR4_PWM_SetCommutationDuty(uint16_t u16Duty);
 uint16_t TMR4_PWM_GetCommutationDuty(void);
 void TMR4_PWM_CommutationStop(void);
 
+/* Open-loop (sensorless) commutation advance */
+void TMR4_PWM_CommutationNextStep(uint8_t direction);
+void TMR4_PWM_CommutationResetSequence(void);
+
 #endif /* __TEMPLATE_TMR4_PWM_H__ */
