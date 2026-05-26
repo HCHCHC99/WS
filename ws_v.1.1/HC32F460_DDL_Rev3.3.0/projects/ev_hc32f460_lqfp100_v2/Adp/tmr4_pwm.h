@@ -5,7 +5,7 @@
 
 /*=============================================================================
  * TMR4 unit 3 complementary PWM on PB9 (TIM4_3_OUH) and PB8 (TIM4_3_OUL)
- * Uses linked double-channel mode with dead-timer for automatic dead-time
+ * GPIO_FUNC_2 for both pins
  *=============================================================================*/
 
 /* Duty cycle range: 0-10000 (representing 0.00% - 100.00%) */

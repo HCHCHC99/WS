@@ -3,7 +3,6 @@
 #include "hc32_ll_gpio.h"
 #include "hc32_ll_fcg.h"
 #include "hc32_ll_utility.h"
-#include "rtt_log.h"
 #include <stdbool.h>
 
 /*=============================================================================
@@ -18,13 +17,13 @@
 static bool s_bConfigured = false;
 
 /*=============================================================================
- * Public API — follows official timer4_pwm_dead_timer example structure
+ * Public API - follows official timer4_pwm_dead_timer example structure
  *
  * Key rules learned from the official example:
- *   1. Only configure the LOW (UL) OC channel — UH is driven by PWM block
+ *   1. Only configure the LOW (UL) OC channel - UH is driven by PWM block
  *   2. Enable OC (TMR4_OC_Cmd) BEFORE initializing PWM (TMR4_PWM_Init)
  *   3. Do NOT call StartReloadTimer or ExtendControlCmd
- *   4. Use default POCR polarity (HOLD_HOLD) — PWM block handles complement
+ *   4. Use default POCR polarity (HOLD_HOLD) - PWM block handles complement
  *=============================================================================*/
 
 void TMR4_PWM_Config(void)
@@ -37,10 +36,10 @@ void TMR4_PWM_Config(void)
     /* Enable TMR4_3 peripheral clock */
     FCG_Fcg2PeriphClockCmd(FCG2_PERIPH_TMR4_3, ENABLE);
 
-    /* GPIO: PB9=TIM4_3_OUH(func3), PB8=TIM4_3_OUL(func3) */
+    /* GPIO: PB9=TIM4_3_OUH(func2), PB8=TIM4_3_OUL(func2) */
     LL_PERIPH_WE(LL_PERIPH_GPIO);
-    GPIO_SetFunc(GPIO_PORT_B, GPIO_PIN_09, GPIO_FUNC_3);
-    GPIO_SetFunc(GPIO_PORT_B, GPIO_PIN_08, GPIO_FUNC_3);
+    GPIO_SetFunc(GPIO_PORT_B, GPIO_PIN_09, GPIO_FUNC_2);
+    GPIO_SetFunc(GPIO_PORT_B, GPIO_PIN_08, GPIO_FUNC_2);
     LL_PERIPH_WP(LL_PERIPH_GPIO);
 
     /************************* Counter *************************/
@@ -90,8 +89,6 @@ void TMR4_PWM_Config(void)
                               TMR4_PWM_PDBR_IDX, TMR4_PWM_DEAD_TIME);
 
     s_bConfigured = true;
-    MAIN_D("[TMR4_PWM] PB9=OUH, PB8=OUL, 20kHz, dead-time=%d ticks\r\n",
-           TMR4_PWM_DEAD_TIME);
 }
 
 void TMR4_PWM_StartOutput(void)
