@@ -6,12 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Motor control system based on HC32F460 (Cortex-M4) with RS485/Modbus RTU communication. Controls DC motors with Hall sensor feedback, over-current/voltage detection, rotation angle limiting, and fault handling.
 
-All source code lives under `T_v.4.36.15_20260428/HC32F460_DDL_Rev3.3.0/`.
+All source code lives under `ws_v.1.1/HC32F460_DDL_Rev3.3.0/`.
 
 ## Build System
 
 - **Primary IDE:** Keil MDK (uVision 5)
-- **Project file:** `T_v.4.36.15_20260428/HC32F460_DDL_Rev3.3.0/projects/ev_hc32f460_lqfp100_v2/template/MDK/template.uvprojx`
+- **Project file:** `ws_v.1.1/HC32F460_DDL_Rev3.3.0/projects/ev_hc32f460_lqfp100_v2/template/MDK/template.uvprojx`
 - **MCU:** HC32F460xE (512KB Flash) — linker script is `template/MDK/config/linker/HC32F460xE.sct`
 - **Debug probe:** JLink (Cortex-M4)
 - **Build output:** `template/MDK/output/debug/` (`.axf`, `.hex`, `.bin`, `.map`)
@@ -178,24 +178,30 @@ Correct interrupt names (no underscore between INT and number):
 
 - **Dual Hall fallback is broken**: When `MOTOR_HALL_TRIPLE_ENABLE=0`, `Motor_OnArbitrationFwd/Rev` still call `Motor_RampForward/Reverse`, but the TMRA path in `Motor_Update` remains functional via `#else` blocks. The callbacks are wrapped in `#if MOTOR_HALL_TRIPLE_ENABLE` / `#else` preserving both paths.
 - **Hall state 000/111**: When Hall sensors fail (all high or all low), commutation is skipped (guarded by `hall_state >= 1 && hall_state <= 6`).
-- **File encoding**: Source files use GBK encoding for Chinese comments. When using regex tools, match on ASCII portions only.
+- **File encoding**: Source files use GBK encoding for Chinese comments. The Read/Edit/Write tools operate in UTF-8 only — **never edit .c/.h files directly** or Chinese comments will be permanently corrupted. Always use the GBK-safe edit workflow below.
 
-### Session Change Summary (2026-05-26)
+### GBK-Safe Edit Workflow (MANDATORY for .c/.h files)
 
-Uncommitted changes vs HEAD (`55bd302`):
+Every edit to a `.c` or `.h` file MUST follow this 3-step process:
 
-| File | Changes |
-|------|---------|
-| `Adp/Template_tmr4_pwm.c` | Added `s_u8OpenLoopStepIndex`, `s_au8StepToHallFwd[6]`, `s_au8StepToHallRev[6]`, `TMR4_PWM_CommutationNextStep()`, `TMR4_PWM_CommutationResetSequence()`. `TMR4_PWM_CommutationStop()` also resets step index |
-| `Adp/Template_tmr4_pwm.h` | Added `TMR4_PWM_CommutationNextStep()` and `TMR4_PWM_CommutationResetSequence()` prototypes |
-| `App/App_Motor_Project.h` | Added `MOTOR_COMMUTATION_SENSORLESS` (default 0), `COMM_STEP_INTERVAL_MIN_US` (800), `COMM_STEP_INTERVAL_MAX_US` (5000) |
-| `Dev/dev_motor.c` | Added `s_u32LastCommStepTime`, `s_u8CommDirCache` tracking variables. `Motor_Update()` now has 3-way branch: open-loop timed / Hall GPIO / original TMRA. `Motor_Init()` TMRA register sync wrapped in `#if !MOTOR_HALL_TRIPLE_ENABLE` |
+```bash
+# Step 1: Convert GBK → UTF-8 before reading/editing
+iconv -f GBK -t UTF-8 path/to/file.c > path/to/file_utf8.c
 
-Previously committed (`55bd302`): Triple Hall support in `Motor_hall.c/h`, `dev_motor_hall.c/h`; TMR4 six-step commutation tables and `TMR4_PWM_CommutationStep()`; Hall C pin/IRQ definitions in `App_Motor_Project.c/h`.
+# Step 2: Edit file_utf8.c using Read/Edit tools (normal UTF-8 editing)
+
+# Step 3: Convert UTF-8 → GBK after editing, then remove temp file
+iconv -f UTF-8 -t GBK path/to/file_utf8.c > path/to/file.c
+rm path/to/file_utf8.c
+```
+
+If `iconv` fails with "cannot convert" on Step 1, the file is already corrupted from a previous bad edit. Restore it from git (`git show <commit>:path`) and re-apply changes with the safe workflow.
+
+**For new files**: Write directly in UTF-8, then convert to GBK with `iconv -f UTF-8 -t GBK`.
 
 ## Documentation
 
-- `T_v.4.36.15_20260428/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
-- `T_v.4.36.15_20260428/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
-- `T_v.4.36.15_20260428/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
-- `T_v.4.36.15_20260428/modbus_test_cmds.py` — Generates Modbus RTU hex command frames for read (0x03), write (0x06), multi-write (0x10), fault clear, and control commands. Edit the config at the top of the script and run `py modbus_test_cmds.py`
+- `ws_v.1.1/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
+- `ws_v.1.1/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
+- `ws_v.1.1/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
+- `ws_v.1.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames
