@@ -15,10 +15,9 @@
   #include "rtt_manager.h"
   #include "Pwm.h"
   #include "hc32_ll_utility.h"
-#include "Template_tmr4_pwm.h"
 
   /*=============================================================================
-   * ȫ��PWMʵ�������������ʹ�ã�?
+   * ȫ��PWMʵ�������������ʹ�ã�
    *=============================================================================*/
   pwm_t g_motor_pwm_ch1;  // PB6
   pwm_t g_motor_pwm_ch2;  // PB7
@@ -35,7 +34,7 @@
    *=============================================================================*/
   static void Motor_Pwm_Init(void)
   {
-      // ����������?4��ͨ��ȫ������Ч������תͨ��ռ�ձȷ���ʵ�֣�
+      // ���������Ҫ4��ͨ��ȫ������Ч������תͨ��ռ�ձȷ���ʵ�֣�
       // Ƶ�ʣ�20kHz����ʼռ�ձȣ�0%
 
       // ����GPIO���裨�����޸�GPIO�������ã�
@@ -65,7 +64,7 @@
                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
                                   6000, 0, PWM_ACTIVE_LOW);
 
-      // ����GPIO���裨������ú�������?
+      // ����GPIO���裨������ú�������
       LL_PERIPH_WP(LL_PERIPH_GPIO);
 
       // ����FCG���裨ʹ�ܶ�ʱ��ʱ�ӣ�
@@ -77,7 +76,7 @@
       PWM_Start(&g_motor_pwm_ch3);
       PWM_Start(&g_motor_pwm_ch4);
 
-      // ʹ�����?
+      // ʹ�����
       PWM_OutputCmd(&g_motor_pwm_ch1, PWM_OUTPUT_ENABLE);
       PWM_OutputCmd(&g_motor_pwm_ch2, PWM_OUTPUT_ENABLE);
       PWM_OutputCmd(&g_motor_pwm_ch3, PWM_OUTPUT_ENABLE);
@@ -115,8 +114,8 @@
       /* ��ʼ�����ϴ����������ĵ�ѹ/�����¼������¹����룩 */
       FaultHandler_Init();
 
-      /* ��ʼ�� TMR4 6·����PWM (PB4~PB9: UH UL VH VL WH WL) */
-      TMR4_PWM_Config();
+      /* ��ʼ�����PWM���ڵ���豸��ʼ��֮ǰ�� */
+      Motor_Pwm_Init();
 
       /*=========================================================================
        * �������ģʽ����������Keil Watch�������޸ģ�
@@ -124,7 +123,7 @@
        *=========================================================================*/
       // volatile uint8_t motor_mode = 0;
 
-      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��?
+      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��
       EventBus_Enable();
 
       while (1)
@@ -133,10 +132,10 @@
           App_Comm_Poll();
 
           // ����PWM״̬��������������
-        //   PWM_Update(&g_motor_pwm_ch1);
-        //   PWM_Update(&g_motor_pwm_ch2);
-        //   PWM_Update(&g_motor_pwm_ch3);
-        //   PWM_Update(&g_motor_pwm_ch4);
+          PWM_Update(&g_motor_pwm_ch1);
+          PWM_Update(&g_motor_pwm_ch2);
+          PWM_Update(&g_motor_pwm_ch3);
+          PWM_Update(&g_motor_pwm_ch4);
 
           // // ÿ��ѭ�������� motor_mode ���ö�Ӧ����
           // if (motor_mode == 0) {

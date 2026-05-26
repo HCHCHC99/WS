@@ -4,24 +4,19 @@
 #include "hc32_ll.h"
 #include "Adapter.h"
 
-/* ========== Ë«ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½ ========== */
-#ifndef MOTOR_HALL_TRIPLE_ENABLE
-#define MOTOR_HALL_TRIPLE_ENABLE    (1)     /* 0=Ë«ï¿½ï¿½ï¿½ï¿½(A+B), 1=ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(A+B+C) */
-#endif
-
-/* ========== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½Ù¡ï¿½×ªï¿½ï¿½ï¿½ï¿½Ø£ï¿½ ========== */
+/* ========== µç»úÅäÖÃ²ÎÊý£¨½ö×ªËÙ¡¢×ªÏòÏà¹Ø£© ========== */
 
 /**
- * @brief ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+ * @brief »ô¶û´«¸ÐÆ÷ÅäÖÃ
  */
 typedef struct {
-    /* GPIOï¿½ï¿½ï¿½ï¿½ */
-    uint8_t hall_a_port;        /* GPIO_PORT_A ï¿½ï¿½ */
+    /* GPIOÅäÖÃ */
+    uint8_t hall_a_port;        /* GPIO_PORT_A µÈ */
     uint16_t hall_a_pin;        /* GPIO_PIN_xx */
     uint8_t hall_b_port;
     uint16_t hall_b_pin;
     
-    /* ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½ï¿½ */
+    /* ÖÐ¶ÏÅäÖÃ */
     uint32_t eirq_ch_a;         /* EXTINT_CHxx */
     uint32_t eirq_ch_b;
     uint8_t irqn_a;             /* INTxxx_IRQn */
@@ -29,17 +24,8 @@ typedef struct {
     uint32_t irq_src_a;         /* INT_PORT_EIRQx */
     uint32_t irq_src_b;
     uint8_t irq_priority;
-
-#if MOTOR_HALL_TRIPLE_ENABLE
-    /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Hall Cï¿½ï¿½GPIOï¿½ï¿½ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½Ã£ï¿½ */
-    uint8_t hall_c_port;        /* GPIO_PORT_x */
-    uint16_t hall_c_pin;        /* GPIO_PIN_xx */
-    uint32_t eirq_ch_c;         /* EXTINT_CHxx */
-    uint8_t irqn_c;             /* INTxxx_IRQn */
-    uint32_t irq_src_c;         /* INT_PORT_EIRQx */
-#endif
     
-    /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½×ªï¿½ï¿½ï¿½ï¿½Ø£ï¿½ */
+    /* µç»ú²ÎÊý£¨×ªËÙ×ªÏòÏà¹Ø£© */
     uint8_t pole_pairs;
     uint8_t hall_count;
     uint16_t custom_pulses_per_rev;
@@ -47,7 +33,7 @@ typedef struct {
 } motor_hall_config_t;
 
 
-/* ========== Ä¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿? - PA9, PA10ï¿½ï¿½ ========== */
+/* ========== Ä¬ÈÏÅäÖÃÊ¾Àý£¨Ô­µç»úÅäÖÃ - PA9, PA10£© ========== */
 #define DEFAULT_HALL_A_PORT      GPIO_PORT_A
 #define DEFAULT_HALL_A_PIN       GPIO_PIN_09
 #define DEFAULT_HALL_B_PORT      GPIO_PORT_A
@@ -62,14 +48,14 @@ typedef struct {
 
 #define DEFAULT_HALL_IRQ_PRIORITY DDL_IRQ_PRIORITY_02
 
-/* Ä¬ï¿½Ïµï¿½ï¿½ï¿½ï¿½ï¿½ï¿? */
+/* Ä¬ÈÏµç»ú²ÎÊý */
 #define DEFAULT_POLE_PAIRS       (3)     
 #define DEFAULT_HALL_COUNT       (2)     
 
-/* ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½Ã¿×ªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ 2ï¿½ï¿½Ë«ï¿½ï¿½ï¿½Ø£ï¿½ */
+/* ×Ô¶¯¼ÆËãÃ¿×ªÂö³åÊý£º¼«¶ÔÊý ¡Á »ô¶ûÊý ¡Á 2£¨Ë«±ßÑØ£© */
 #define CALC_PULSES_PER_REV(pole_pairs, hall_count) ((pole_pairs) * (hall_count) * 2)
 
-/* ========== ï¿½ï¿½ï¿½ï¿½×´Ì¬Ã¶ï¿½ï¿½ ========== */
+/* ========== ·½Ïò×´Ì¬Ã¶¾Ù ========== */
 typedef enum {
     MOTOR_DIRECTION_NONE = 0,
     MOTOR_DIRECTION_FORWARD,
@@ -77,7 +63,7 @@ typedef enum {
     MOTOR_DIRECTION_STOP,
 } motor_direction_t;
 
-/* ========== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬Ã¶ï¿½ï¿½ ========== */
+/* ========== »ô¶û¹¤×÷×´Ì¬Ã¶¾Ù ========== */
 typedef enum {
     HALL_STATUS_NONE = 0,
     HALL_STATUS_A_ONLY,
@@ -86,22 +72,22 @@ typedef enum {
     HALL_STATUS_ERROR
 } hall_working_status_t;
 
-/* ========== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¸ï¿½ï¿½Ö¸ï¿½ë£? ========== */
+/* ========== »ô¶û¾ä±ú£¨²»Í¸Ã÷Ö¸Õë£© ========== */
 typedef struct motor_hall_handle_t* motor_hall_handle_t;
 
-/* ========== ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½Ù½Ó¿ï¿½ ========== */
+/* ========== ´´½¨/Ïú»Ù½Ó¿Ú ========== */
 
 motor_hall_handle_t motor_hall_create(const motor_hall_config_t* config);
 void motor_hall_destroy(motor_hall_handle_t handle);
 
-/* ========== ï¿½ï¿½Ê¼ï¿½ï¿½/ï¿½ï¿½ï¿½Â½Ó¿ï¿½ ========== */
+/* ========== ³õÊ¼»¯/¸üÐÂ½Ó¿Ú ========== */
 
 void motor_hall_system_init(void);
 void motor_hall_start(motor_hall_handle_t handle);
 void motor_hall_stop(motor_hall_handle_t handle);
 void motor_hall_update(motor_hall_handle_t handle);
 
-/* ========== ×ªï¿½ï¿½ï¿½ï¿½Ø½Ó¿ï¿? ========== */
+/* ========== ×ªËÙÏà¹Ø½Ó¿Ú ========== */
 
 float motor_hall_get_rpm(motor_hall_handle_t handle);
 float motor_hall_get_rpm_raw(motor_hall_handle_t handle);
@@ -109,22 +95,18 @@ uint32_t motor_hall_get_pulse_interval_us(motor_hall_handle_t handle);
 uint8_t motor_hall_is_running(motor_hall_handle_t handle);
 uint8_t motor_hall_is_stalled(motor_hall_handle_t handle);
 
-/* ========== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø½Ó¿ï¿? ========== */
+/* ========== ·½ÏòÏà¹Ø½Ó¿Ú ========== */
 
 motor_direction_t motor_hall_get_direction(motor_hall_handle_t handle);
 uint8_t motor_hall_get_direction_confidence(motor_hall_handle_t handle);
 uint8_t motor_hall_is_direction_changed(motor_hall_handle_t handle);
 
-/* ========== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó¿ï¿½ ========== */
+/* ========== »ô¶û¼ÆÊý½Ó¿Ú ========== */
 
 uint32_t motor_hall_get_hall_a_count(motor_hall_handle_t handle);
 uint32_t motor_hall_get_hall_b_count(motor_hall_handle_t handle);
 uint32_t motor_hall_get_total_pulse_count(motor_hall_handle_t handle);
 void motor_hall_reset_counts(motor_hall_handle_t handle);
-#if MOTOR_HALL_TRIPLE_ENABLE
-uint32_t motor_hall_get_hall_c_count(motor_hall_handle_t handle);
-#endif
-
 hall_working_status_t motor_hall_get_status(motor_hall_handle_t handle);
 uint8_t motor_hall_get_active_hall_count(motor_hall_handle_t handle);
 uint16_t motor_hall_get_pulses_per_rev(motor_hall_handle_t handle);

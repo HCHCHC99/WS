@@ -713,11 +713,6 @@
               <FileType>1</FileType>
               <FilePath>..\..\Adp\Comm_HAL.c</FilePath>
             </File>
-            <File>
-              <FileName>Template_tmr4_pwm.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Adp\Template_tmr4_pwm.c</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>
@@ -1578,11 +1573,6 @@
               <FileName>Comm_HAL.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Adp\Comm_HAL.c</FilePath>
-            </File>
-            <File>
-              <FileName>Template_tmr4_pwm.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Adp\Template_tmr4_pwm.c</FilePath>
             </File>
           </Files>
         </Group>

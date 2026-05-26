@@ -7,29 +7,20 @@
 #include <string.h>
 #include "rtt_log.h"
 #include "dev_rturn.h"          // Ìí¼ÓÕâÐÐ£¬ÓÃÓÚ RTurn_LimitEvent_t
-#if MOTOR_HALL_TRIPLE_ENABLE
-#include "Template_tmr4_pwm.h"  // TMR4å…­æ­¥æ¢ç›¸PWM
-#include "Motor_hall.h"         // Hallä¼ æ„Ÿå™¨é©±åŠ¨
-#else
 #include "Template_Pwm.h"       // PWMÅäÖÃ£¨TMRA_4, PB6/PB7£©
 #include "hc32_ll_tmra.h"      // TMRA¼Ä´æÆ÷²Ù×÷
 #include "Pwm.h"                // PWMÇý¶¯
-#endif
 
 // ÒýÓÃ main.c ÖÐ¶¨ÒåµÄPWMÊµÀý
-#if !MOTOR_HALL_TRIPLE_ENABLE
 extern pwm_t g_motor_pwm_ch1;
 extern pwm_t g_motor_pwm_ch2;
 extern pwm_t g_motor_pwm_ch3;
 extern pwm_t g_motor_pwm_ch4;
-#endif
 // ÔÚÎÄ¼þ¿ªÍ·£¬ÆäËû¾²Ì¬±äÁ¿¶¨Òå¸½½üÌí¼Ó
 
 static MotorDir_t s_eLastArbitrationDir = DIR_NONE;  // ÉÏ´ÎÖÙ²ÃµÄ·½Ïò
 static uint16_t s_u16LastTargetDuty = 0;              // ÉÏ´ÎµÄÄ¿±êÕ¼¿Õ±È
 static bool s_bStopPolarityPending = false;           // ÊÇ·ñÐèÒªÇÐ»»Í£Ö¹¼«ÐÔ
-static uint32_t s_u32LastCommStepTime = 0;           // ¿ª»·»»ÏàÉÏÒ»²½Ê±¼ä
-static uint8_t  s_u8CommDirCache = 0;               // »º´æµ±Ç°»»Ïà·½Ïò
 
 // ÔÚÎÄ¼þ¿ªÍ·£¬ÆäËû include Ö®ºóÌí¼Ó
 // ´òÓ¡¼ä¸ô¿ØÖÆ
@@ -308,16 +299,6 @@ static void Motor_RunReverseImmediate(uint16_t duty) {
 // ========== µç»úÖÙ²Ã½á¹û»Øµ÷º¯Êý£¨Èõ¶¨Òå£¬ÓÃ»§¿ÉÖØÐ´£© ==========
 //    GPIO_SET(PHU_PORT, PHU_PIN);
 //    GPIO_SET(PHV_PORT, PHV_PIN);
-#if MOTOR_HALL_TRIPLE_ENABLE
-__weak void Motor_OnArbitrationStop(MotorDevice_t* motor) {
-    (void)motor;
-    TMR4_PWM_CommutationStop();
-    s_eLastArbitrationDir = DIR_NONE;
-    s_u16LastTargetDuty = 0;
-    motor_state = 0;
-    MAIN_D("[MOTOR_ARB] Stop: TMR4 commutation stopped\r\n");
-}
-#else
 __weak void Motor_OnArbitrationStop(MotorDevice_t* motor) {
     (void)motor;
     
@@ -357,24 +338,8 @@ __weak void Motor_OnArbitrationStop(MotorDevice_t* motor) {
 }
 
 
-#endif
-
     // GPIO_SET(PHU_PORT, PHU_PIN);
     // GPIO_RESET(PHV_PORT, PHV_PIN);
-#if MOTOR_HALL_TRIPLE_ENABLE
-__weak void Motor_OnArbitrationFwd(MotorDevice_t* motor, float duty) {
-    (void)motor;
-    uint16_t duty_percent = (uint16_t)(duty);
-    if (s_eLastArbitrationDir != DIR_FWD || s_u16LastTargetDuty != duty_percent) {
-        s_bStopPolarityPending = false;
-        TMR4_PWM_SetCommutationDuty(duty_percent * 100U);
-        MAIN_D("[MOTOR_ARB] FWD: TMR4 duty=%lu\r\n", (unsigned long)(duty_percent * 100U));
-        s_eLastArbitrationDir = DIR_FWD;
-        s_u16LastTargetDuty = duty_percent;
-    }
-    motor_state = 1;
-}
-#else
 __weak void Motor_OnArbitrationFwd(MotorDevice_t* motor, float duty) {
     (void)motor;
     uint16_t duty_percent = (uint16_t)(duty);
@@ -393,24 +358,8 @@ __weak void Motor_OnArbitrationFwd(MotorDevice_t* motor, float duty) {
     motor_state = 1;
 }
 
-#endif
-
 //    GPIO_SET(PHV_PORT, PHV_PIN);
 //    GPIO_RESET(PHU_PORT, PHU_PIN);
-#if MOTOR_HALL_TRIPLE_ENABLE
-__weak void Motor_OnArbitrationRev(MotorDevice_t* motor, float duty) {
-    (void)motor;
-    uint16_t duty_percent = (uint16_t)(duty);
-    if (s_eLastArbitrationDir != DIR_REV || s_u16LastTargetDuty != duty_percent) {
-        s_bStopPolarityPending = false;
-        TMR4_PWM_SetCommutationDuty(duty_percent * 100U);
-        MAIN_D("[MOTOR_ARB] REV: TMR4 duty=%lu\r\n", (unsigned long)(duty_percent * 100U));
-        s_eLastArbitrationDir = DIR_REV;
-        s_u16LastTargetDuty = duty_percent;
-    }
-    motor_state = 2;
-}
-#else
 __weak void Motor_OnArbitrationRev(MotorDevice_t* motor, float duty) {
     (void)motor;
     uint16_t duty_percent = (uint16_t)(duty);
@@ -428,8 +377,6 @@ __weak void Motor_OnArbitrationRev(MotorDevice_t* motor, float duty) {
     }
     motor_state = 2;
 }
-
-#endif
 
 // ========== ÄÚ²¿º¯ÊýÉùÃ÷ ==========
 static const MotorDeviceGene_t* Motor_GetGene(MotorDeviceId_t id);
@@ -1210,7 +1157,6 @@ DeviceResult_t Motor_Init(void* handle) {
     // ³õÊ¼»¯µ÷ÊÔ±äÁ¿
     Motor_UpdateDebugInfo(motor);
 
-#if !MOTOR_HALL_TRIPLE_ENABLE
     // ========== ¹Ø¼üÐÞ¸´£ºÍ¬²½Ó²¼þÊµ¼ÊÕ¼¿Õ±Èµ½PWM½á¹¹Ìå ==========
     uint32_t period = TMRA_GetPeriodValue(CM_TMRA_4);
     if (period > 0) {
@@ -1231,10 +1177,8 @@ DeviceResult_t Motor_Init(void* handle) {
         g_motor_pwm_ch4.dutyPercent = duty4;
         
         MAIN_D("[MOTOR] Init: synced PWM duties from hardware: CH1=%d%%, CH2=%d%%, CH3=%d%%, CH4=%d%%\r\n",
-
                duty1, duty2, duty3, duty4);
     }
-#endif
     
     MOTOR_DEBUG("Motor_Init completed, g_pMotor_Dev_Watch set\r\n");
     return RESULT_OK;
@@ -1332,37 +1276,6 @@ DeviceResult_t Motor_Update(void* handle) {
 
     uint32_t now = tickTimer_GetCount();
 
-#if MOTOR_HALL_TRIPLE_ENABLE
-#if MOTOR_COMMUTATION_SENSORLESS
-    // ========== TMR4¿ª»·»»Ïà£º¶¨Ê±ÍÆ½ø»»Ïà²½ ==========
-    if (s_eLastArbitrationDir != DIR_NONE) {
-        uint8_t dir = (s_eLastArbitrationDir == DIR_FWD) ? 1 : 2;
-        // »»Ïà¼ä¸ô°´ duty ÏßÐÔ²åÖµ£¬dutyÔ½¸ß¼ä¸ôÔ½¶Ì
-        uint32_t interval_ms = COMM_STEP_INTERVAL_MAX_US / 1000 -
-                              ((COMM_STEP_INTERVAL_MAX_US - COMM_STEP_INTERVAL_MIN_US) / 1000) * s_u16LastTargetDuty / 100;
-        if (interval_ms < 1) interval_ms = 1;
-        if (now - s_u32LastCommStepTime >= interval_ms) {
-            TMR4_PWM_CommutationNextStep(dir);
-            s_u32LastCommStepTime = now;
-        }
-    } else {
-        s_u32LastCommStepTime = now;
-        TMR4_PWM_CommutationResetSequence();
-    }
-#else
-    // ========== TMR4Áù²½»»Ïà£º¸ù¾ÝHall×´Ì¬¸üÐÂ»»Ïà ==========
-    if (s_eLastArbitrationDir != DIR_NONE) {
-        uint8_t hall_a = (GPIO_ReadInputPins(GPIO_PORT_A, GPIO_PIN_10) == PIN_SET) ? 1 : 0;
-        uint8_t hall_b = (GPIO_ReadInputPins(GPIO_PORT_A, GPIO_PIN_09) == PIN_SET) ? 1 : 0;
-        uint8_t hall_c = (GPIO_ReadInputPins(GPIO_PORT_A, GPIO_PIN_08) == PIN_SET) ? 1 : 0;
-        uint8_t hall_state = (hall_c << 2) | (hall_b << 1) | hall_a;
-        if (hall_state >= 1 && hall_state <= 6) {
-            uint8_t dir = (s_eLastArbitrationDir == DIR_FWD) ? 1 : 2;
-            TMR4_PWM_CommutationStep(hall_state, dir);
-        }
-    }
-#endif
-#else
     // ========== ÐÂÔö£º¸üÐÂËùÓÐPWMÍ¨µÀµÄ»ºÆô¶¯×´Ì¬ ==========
     PWM_Update(&g_motor_pwm_ch1);
     PWM_Update(&g_motor_pwm_ch2);
@@ -1383,8 +1296,6 @@ DeviceResult_t Motor_Update(void* handle) {
             MAIN_D("[MOTOR] Stop ramp complete, switched to stop polarity\r\n");
         }
     }
-
-#endif
 
     // Ã¿50msÖÙ²ÃÒ»´Î
     if (now - motor->last_arbitration_time >= 50) {
