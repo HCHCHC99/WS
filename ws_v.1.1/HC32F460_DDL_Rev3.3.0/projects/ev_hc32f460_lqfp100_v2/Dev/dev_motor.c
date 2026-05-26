@@ -127,23 +127,23 @@ static void Motor_SetStopDuty(void) {
     (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH2, &stcPwmInit);
     TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH2, ENABLE);
 
-    /* CH3(PB8) - 高有效，50% */
-    stcPwmInit.u32CompareValue        = u32Compare;
-    stcPwmInit.u16StartPolarity       = TMRA_PWM_LOW;
-    stcPwmInit.u16StopPolarity        = TMRA_PWM_LOW;
-    stcPwmInit.u16CompareMatchPolarity = TMRA_PWM_HIGH;
-    stcPwmInit.u16PeriodMatchPolarity = TMRA_PWM_LOW;
-    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH3, &stcPwmInit);
-    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH3, ENABLE);
-
-    /* CH4(PB9) - 低有效，50% */
-    stcPwmInit.u32CompareValue        = u32Compare;
-    stcPwmInit.u16StartPolarity       = TMRA_PWM_HIGH;
-    stcPwmInit.u16StopPolarity        = TMRA_PWM_HIGH;
-    stcPwmInit.u16CompareMatchPolarity = TMRA_PWM_LOW;
-    stcPwmInit.u16PeriodMatchPolarity = TMRA_PWM_HIGH;
-    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH4, &stcPwmInit);
-    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH4, ENABLE);
+//    /* CH3(PB8) - 高有效，50% */
+//    stcPwmInit.u32CompareValue        = u32Compare;
+//    stcPwmInit.u16StartPolarity       = TMRA_PWM_LOW;
+//    stcPwmInit.u16StopPolarity        = TMRA_PWM_LOW;
+//    stcPwmInit.u16CompareMatchPolarity = TMRA_PWM_HIGH;
+//    stcPwmInit.u16PeriodMatchPolarity = TMRA_PWM_LOW;
+//    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH3, &stcPwmInit);
+//    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH3, ENABLE);
+//
+//    /* CH4(PB9) - 低有效，50% */
+//    stcPwmInit.u32CompareValue        = u32Compare;
+//    stcPwmInit.u16StartPolarity       = TMRA_PWM_HIGH;
+//    stcPwmInit.u16StopPolarity        = TMRA_PWM_HIGH;
+//    stcPwmInit.u16CompareMatchPolarity = TMRA_PWM_LOW;
+//    stcPwmInit.u16PeriodMatchPolarity = TMRA_PWM_HIGH;
+//    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH4, &stcPwmInit);
+//    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH4, ENABLE);
 }
 
 // ========== 新增：设置运行时的低有效极性（全部低有效） ==========
@@ -163,13 +163,13 @@ static void Motor_SetRunPolarity(void) {
     (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH2, &stcPwmInit);
     TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH2, ENABLE);
 
-    /* CH3(PB8) - 低有效 */
-    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH3, &stcPwmInit);
-    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH3, ENABLE);
-
-    /* CH4(PB9) - 低有效 */
-    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH4, &stcPwmInit);
-    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH4, ENABLE);
+//    /* CH3(PB8) - 低有效 */
+//    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH3, &stcPwmInit);
+//    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH3, ENABLE);
+//
+//    /* CH4(PB9) - 低有效 */
+//    (void)TMRA_PWM_Init(CM_TMRA_4, TMRA_CH4, &stcPwmInit);
+//    TMRA_PWM_OutputCmd(CM_TMRA_4, TMRA_CH4, ENABLE);
 }
 
 // ========== 新增：使用PWM驱动设置运行时的占空比（全部低有效） ==========
@@ -178,8 +178,8 @@ static void Motor_SetRunDutyDirect(uint16_t ch1, uint16_t ch2, uint16_t ch3, uin
     uint32_t u32Period = TMRA_GetPeriodValue(CM_TMRA_4);
     TMRA_SetCompareValue(CM_TMRA_4, TMRA_CH1, (u32Period * ch1) / 100U);
     TMRA_SetCompareValue(CM_TMRA_4, TMRA_CH2, (u32Period * ch2) / 100U);
-    TMRA_SetCompareValue(CM_TMRA_4, TMRA_CH3, (u32Period * ch3) / 100U);
-    TMRA_SetCompareValue(CM_TMRA_4, TMRA_CH4, (u32Period * ch4) / 100U);
+//    TMRA_SetCompareValue(CM_TMRA_4, TMRA_CH3, (u32Period * ch3) / 100U);
+//    TMRA_SetCompareValue(CM_TMRA_4, TMRA_CH4, (u32Period * ch4) / 100U);
 }
 
 // ========== 修改：切换极性前先将占空比归零 ==========
@@ -199,23 +199,23 @@ static void Motor_RampForward(uint16_t target_duty) {
         // 快速将占空比降到 0（50ms 快速归零）
         PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch1, current_duty_ch1, 0, 50);
         PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch2, current_duty_ch1, 0, 50);
-        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 0, 50);
-        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 0, 50);
-        
+//        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 0, 50);
+//        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 0, 50);
+
         // 等待归零完成
         tickTimer_DelayMs(50);
         current_duty_ch1 = 0;
         MAIN_D("[MOTOR] Ramp FWD: zeroed duty before polarity switch\r\n");
     }
-    
+
     // 切换极性（此时占空比为0，不会冲击）
     Motor_SetRunPolarity();
-    
+
     // 从 0% 缓启动到目标值
     PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch1, 0, duty_low, MOTOR_RAMP_TIME_MS);
     PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch2, 0, duty_low, MOTOR_RAMP_TIME_MS);
-    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 0, duty_high, MOTOR_RAMP_TIME_MS);
-    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 0, duty_high, MOTOR_RAMP_TIME_MS);
+//    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 0, duty_high, MOTOR_RAMP_TIME_MS);
+//    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 0, duty_high, MOTOR_RAMP_TIME_MS);
 }
 
 static void Motor_RampReverse(uint16_t target_duty) {
@@ -234,22 +234,22 @@ static void Motor_RampReverse(uint16_t target_duty) {
         // 快速将占空比降到 0（50ms 快速归零）
         PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch1, current_duty_ch1, 0, 50);
         PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch2, current_duty_ch1, 0, 50);
-        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 0, 50);
-        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 0, 50);
-        
+//        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 0, 50);
+//        PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 0, 50);
+
         // 等待归零完成（简单延时，或轮询状态）
         tickTimer_DelayMs(50);
         current_duty_ch1 = 0;
     }
-    
+
     // 切换极性（此时占空比为0，不会冲击）
     Motor_SetRunPolarity();
-    
+
     // 从 0% 缓启动到目标值
     PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch1, 0, duty_low, MOTOR_RAMP_TIME_MS);
     PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch2, 0, duty_low, MOTOR_RAMP_TIME_MS);
-    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 0, duty_high, MOTOR_RAMP_TIME_MS);
-    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 0, duty_high, MOTOR_RAMP_TIME_MS);
+//    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 0, duty_high, MOTOR_RAMP_TIME_MS);
+//    PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 0, duty_high, MOTOR_RAMP_TIME_MS);
 }
 
 // ========== 新增：立即设置正转（无缓启动） ==========
@@ -263,13 +263,13 @@ static void Motor_RunForwardImmediate(uint16_t duty) {
     
     // 立即设置占空比
     Motor_SetRunDutyDirect(duty_low, duty_low, duty_high, duty_high);
-    
+
     // 同时更新PWM驱动的当前占空比（保持同步）
     PWM_SetDuty(&g_motor_pwm_ch1, duty_low);
     PWM_SetDuty(&g_motor_pwm_ch2, duty_low);
-    PWM_SetDuty(&g_motor_pwm_ch3, duty_high);
-    PWM_SetDuty(&g_motor_pwm_ch4, duty_high);
-    
+//    PWM_SetDuty(&g_motor_pwm_ch3, duty_high);
+//    PWM_SetDuty(&g_motor_pwm_ch4, duty_high);
+
     MAIN_D("[MOTOR] Immediate FWD: duty=%d%%, CH1/2=%d%%, CH3/4=%d%%\r\n",
            limited_duty, duty_low, duty_high);
 }
@@ -285,13 +285,13 @@ static void Motor_RunReverseImmediate(uint16_t duty) {
     
     // 立即设置占空比
     Motor_SetRunDutyDirect(duty_low, duty_low, duty_high, duty_high);
-    
+
     // 同时更新PWM驱动的当前占空比（保持同步）
     PWM_SetDuty(&g_motor_pwm_ch1, duty_low);
     PWM_SetDuty(&g_motor_pwm_ch2, duty_low);
-    PWM_SetDuty(&g_motor_pwm_ch3, duty_high);
-    PWM_SetDuty(&g_motor_pwm_ch4, duty_high);
-    
+//    PWM_SetDuty(&g_motor_pwm_ch3, duty_high);
+//    PWM_SetDuty(&g_motor_pwm_ch4, duty_high);
+
     MAIN_D("[MOTOR] Immediate REV: duty=%d%%, CH1/2=%d%%, CH3/4=%d%%\r\n",
            limited_duty, duty_low, duty_high);
 }
@@ -322,8 +322,8 @@ __weak void Motor_OnArbitrationStop(MotorDevice_t* motor) {
             // 后续停止：使用缓启动
             PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch1, current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
             PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch2, current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
-            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
-            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
+//            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch3, 100 - current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
+//            PWM_StartRamp_TargetFromStart(&g_motor_pwm_ch4, 100 - current_duty_ch1, 50, MOTOR_RAMP_TIME_MS);
             
             // 标记需要切换停止极性（缓停完成后切换）
             s_bStopPolarityPending = true;
@@ -1162,22 +1162,22 @@ DeviceResult_t Motor_Init(void* handle) {
     if (period > 0) {
         uint32_t cmp1 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH1);
         uint32_t cmp2 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH2);
-        uint32_t cmp3 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH3);
-        uint32_t cmp4 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH4);
-        
+//        uint32_t cmp3 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH3);
+//        uint32_t cmp4 = TMRA_GetCompareValue(CM_TMRA_4, TMRA_CH4);
+
         uint16_t duty1 = (uint16_t)((cmp1 * 100) / period);
         uint16_t duty2 = (uint16_t)((cmp2 * 100) / period);
-        uint16_t duty3 = (uint16_t)((cmp3 * 100) / period);
-        uint16_t duty4 = (uint16_t)((cmp4 * 100) / period);
-        
+//        uint16_t duty3 = (uint16_t)((cmp3 * 100) / period);
+//        uint16_t duty4 = (uint16_t)((cmp4 * 100) / period);
+
         // 直接更新PWM结构体中的占空比
         g_motor_pwm_ch1.dutyPercent = duty1;
         g_motor_pwm_ch2.dutyPercent = duty2;
-        g_motor_pwm_ch3.dutyPercent = duty3;
-        g_motor_pwm_ch4.dutyPercent = duty4;
-        
-        MAIN_D("[MOTOR] Init: synced PWM duties from hardware: CH1=%d%%, CH2=%d%%, CH3=%d%%, CH4=%d%%\r\n",
-               duty1, duty2, duty3, duty4);
+//        g_motor_pwm_ch3.dutyPercent = duty3;
+//        g_motor_pwm_ch4.dutyPercent = duty4;
+
+        MAIN_D("[MOTOR] Init: synced PWM duties from hardware: CH1=%d%%, CH2=%d%%\r\n",
+               duty1, duty2);
     }
     
     MOTOR_DEBUG("Motor_Init completed, g_pMotor_Dev_Watch set\r\n");
@@ -1279,16 +1279,16 @@ DeviceResult_t Motor_Update(void* handle) {
     // ========== 新增：更新所有PWM通道的缓启动状态 ==========
     PWM_Update(&g_motor_pwm_ch1);
     PWM_Update(&g_motor_pwm_ch2);
-    PWM_Update(&g_motor_pwm_ch3);
-    PWM_Update(&g_motor_pwm_ch4);
+//    PWM_Update(&g_motor_pwm_ch3);
+//    PWM_Update(&g_motor_pwm_ch4);
 
     // ========== 新增：检查缓停是否完成，需要切换停止极性 ==========
     if (s_bStopPolarityPending) {
         // 检查所有通道是否都完成了缓启动（状态为IDLE）
         if (PWM_GetState(&g_motor_pwm_ch1) == PWM_STATE_IDLE &&
-            PWM_GetState(&g_motor_pwm_ch2) == PWM_STATE_IDLE &&
-            PWM_GetState(&g_motor_pwm_ch3) == PWM_STATE_IDLE &&
-            PWM_GetState(&g_motor_pwm_ch4) == PWM_STATE_IDLE) {
+            PWM_GetState(&g_motor_pwm_ch2) == PWM_STATE_IDLE) {
+//            PWM_GetState(&g_motor_pwm_ch3) == PWM_STATE_IDLE &&
+//            PWM_GetState(&g_motor_pwm_ch4) == PWM_STATE_IDLE) {
             
             // 缓停完成，切换到停止极性
             Motor_SetStopDuty();
