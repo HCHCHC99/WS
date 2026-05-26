@@ -11,10 +11,25 @@
 /* Duty cycle range: 0-10000 (representing 0.00% - 100.00%) */
 #define TMR4_PWM_DUTY_MAX  10000U
 
-/* Initialize TMR4, GPIO, counter, OC channels, PWM dead-timer mode */
-void TMR4_PWM_Config(void);
+/* Output mode */
+typedef enum {
+    TMR4_OUTPUT_MODE_COMPLEMENTARY = 0,  /* Complementary + dead-time (direct MOSFET drive) */
+    TMR4_OUTPUT_MODE_SYNC          = 1,  /* Same signal on both outputs (external gate-driver IC) */
+} tmr4_output_mode_t;
 
-/* Enable PWM outputs (start counter + enable OC output) */
+/* Configuration structure for one TMR4 PWM channel pair */
+typedef struct {
+    tmr4_output_mode_t mode;              /* Complementary vs sync */
+    uint16_t           polarity;          /* Output polarity, use TMR4_PWM_OXH_*_OXL_* macros */
+    uint16_t           freq_hz;           /* PWM frequency in Hz (period auto-calculated from PCLK1) */
+    uint16_t           dead_time_rising;  /* PDAR dead-time, unit: PCLK1 ticks */
+    uint16_t           dead_time_falling; /* PDBR dead-time, unit: PCLK1 ticks */
+} tmr4_pwm_config_t;
+
+/* Initialize TMR4, GPIO, counter, OC channels, PWM mode */
+void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig);
+
+/* Enable PWM outputs (start counter) */
 void TMR4_PWM_StartOutput(void);
 
 /* Disable PWM outputs (stop counter + disable OC output) */

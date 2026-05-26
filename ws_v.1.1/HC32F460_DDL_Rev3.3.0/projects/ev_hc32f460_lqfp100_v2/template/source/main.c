@@ -118,10 +118,17 @@
       /* ��ʼ�����PWM���ڵ���豸��ʼ��֮ǰ��? */
     //   Motor_Pwm_Init();
 	  tickTimer_DelayMs(5);
-      TMR4_PWM_Config();
-	tickTimer_DelayMs(5);
+      static const tmr4_pwm_config_t pwm_cfg = {
+          .mode              = TMR4_OUTPUT_MODE_COMPLEMENTARY,
+          .polarity          = TMR4_PWM_OXH_HOLD_OXL_HOLD,
+          .freq_hz           = 50000,
+          .dead_time_rising  = 100,
+          .dead_time_falling = 100,
+      };
+      TMR4_PWM_Config(&pwm_cfg);
+
       TMR4_PWM_StartOutput();
-	tickTimer_DelayMs(5);
+
       /*=========================================================================
        * �������ģʽ����������Keil Watch�������޸ģ�
        * 0: ֹͣ, 1: ��ת, 2: ��ת

@@ -2,36 +2,31 @@
 #include "hc32_ll_tmr4.h"
 #include "hc32_ll_gpio.h"
 #include "hc32_ll_fcg.h"
+#include "hc32_ll_clk.h"
 #include "hc32_ll_utility.h"
 #include <stdbool.h>
 
-/*=============================================================================
- * Timing parameters
- * PCLK2 = 100MHz, clock div = 1
- * PWM frequency: 20kHz -> period = 100MHz / 20000 = 5000
- * Dead time: ~1us (100 * 10ns at 100MHz PCLK)
- *=============================================================================*/
-#define TMR4_PWM_PERIOD      5000U
-#define TMR4_PWM_DEAD_TIME   100U
+static bool              s_bConfigured = false;
+static uint16_t          s_u16Period   = 0U;
+static tmr4_output_mode_t s_mode        = TMR4_OUTPUT_MODE_COMPLEMENTARY;
 
-static bool s_bConfigured = false;
-
-/*=============================================================================
- * Public API - follows official timer4_pwm_dead_timer example structure
- *
- * Key rules learned from the official example:
- *   1. Only configure the LOW (UL) OC channel - UH is driven by PWM block
- *   2. Enable OC (TMR4_OC_Cmd) BEFORE initializing PWM (TMR4_PWM_Init)
- *   3. Do NOT call StartReloadTimer or ExtendControlCmd
- *   4. Use default POCR polarity (HOLD_HOLD) - PWM block handles complement
- *=============================================================================*/
-
-void TMR4_PWM_Config(void)
+void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
 {
     stc_tmr4_init_t stcTmr4Init;
     stc_tmr4_oc_init_t stcTmr4OcInit;
     stc_tmr4_pwm_init_t stcTmr4PwmInit;
     un_tmr4_oc_ocmrl_t unOcmrl;
+    un_tmr4_oc_ocmrh_t unOcmrh;
+    uint32_t u32ClockFreq;
+
+    if (pConfig == NULL) {
+        return;
+    }
+
+    s_mode      = pConfig->mode;
+
+    u32ClockFreq = CLK_GetBusClockFreq(CLK_BUS_PCLK1);
+    s_u16Period  = (uint16_t)(u32ClockFreq / pConfig->freq_hz);
 
     /* Enable TMR4_3 peripheral clock */
     FCG_Fcg2PeriphClockCmd(FCG2_PERIPH_TMR4_3, ENABLE);
@@ -45,48 +40,106 @@ void TMR4_PWM_Config(void)
     /************************* Counter *************************/
     TMR4_StructInit(&stcTmr4Init);
     stcTmr4Init.u16ClockDiv    = TMR4_CLK_DIV1;
-    stcTmr4Init.u16PeriodValue = TMR4_PWM_PERIOD - 1U;
+    stcTmr4Init.u16PeriodValue = s_u16Period - 1U;
     TMR4_Init(CM_TMR4_3, &stcTmr4Init);
 
-    /************************* OC low channel (UL) *************************/
+    /************************* OC channels *************************/
     TMR4_OC_StructInit(&stcTmr4OcInit);
     stcTmr4OcInit.u16CompareValue = 0U;
-    TMR4_OC_Init(CM_TMR4_3, TMR4_OC_CH_UL, &stcTmr4OcInit);
 
-    unOcmrl.OCMRx = 0U;
-    unOcmrl.OCMRx_f.OCFDCL  = TMR4_OC_OCF_SET;
-    unOcmrl.OCMRx_f.OCFPKL  = TMR4_OC_OCF_SET;
-    unOcmrl.OCMRx_f.OCFUCL  = TMR4_OC_OCF_SET;
-    unOcmrl.OCMRx_f.OCFZRL  = TMR4_OC_OCF_SET;
-    unOcmrl.OCMRx_f.OPDCL   = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.OPPKL   = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.OPUCL   = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.OPZRL   = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.OPNPKL  = TMR4_OC_HOLD;
-    unOcmrl.OCMRx_f.OPNZRL  = TMR4_OC_HOLD;
-    unOcmrl.OCMRx_f.EOPNDCL = TMR4_OC_HOLD;
-    unOcmrl.OCMRx_f.EOPNUCL = TMR4_OC_HOLD;
-    unOcmrl.OCMRx_f.EOPDCL  = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.EOPPKL  = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.EOPUCL  = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.EOPZRL  = TMR4_OC_INVT;
-    unOcmrl.OCMRx_f.EOPNPKL = TMR4_OC_HOLD;
-    unOcmrl.OCMRx_f.EOPNZRL = TMR4_OC_HOLD;
-    TMR4_OC_SetLowChCompareMode(CM_TMR4_3, TMR4_OC_CH_UL, unOcmrl);
+    if (pConfig->mode == TMR4_OUTPUT_MODE_COMPLEMENTARY) {
+        /* Dead-timer mode: UL only, PWM block auto-generates UH */
+        TMR4_OC_Init(CM_TMR4_3, TMR4_OC_CH_UL, &stcTmr4OcInit);
 
-    /* Enable OC BEFORE PWM init (matches official example order) */
-    TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UL, ENABLE);
+        unOcmrl.OCMRx = 0U;
+        unOcmrl.OCMRx_f.OCFDCL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OCFPKL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OCFUCL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OCFZRL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OPDCL   = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.OPPKL   = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.OPUCL   = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.OPZRL   = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.OPNPKL  = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.OPNZRL  = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPNDCL = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPNUCL = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPDCL  = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.EOPPKL  = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.EOPUCL  = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.EOPZRL  = TMR4_OC_INVT;
+        unOcmrl.OCMRx_f.EOPNPKL = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPNZRL = TMR4_OC_HOLD;
+        TMR4_OC_SetLowChCompareMode(CM_TMR4_3, TMR4_OC_CH_UL, unOcmrl);
 
-    /************************* PWM dead-timer mode *************************/
+        TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UL, ENABLE);
+
+    } else {
+        /* Through mode: both UH and UL OC, identical timing */
+        TMR4_OC_Init(CM_TMR4_3, TMR4_OC_CH_UH, &stcTmr4OcInit);
+        TMR4_OC_Init(CM_TMR4_3, TMR4_OC_CH_UL, &stcTmr4OcInit);
+
+        /* UH: edge-aligned PWM — HIGH at period, LOW at compare match */
+        unOcmrh.OCMRx = 0U;
+        unOcmrh.OCMRx_f.OCFDCH = TMR4_OC_OCF_SET;
+        unOcmrh.OCMRx_f.OCFPKH = TMR4_OC_OCF_SET;
+        unOcmrh.OCMRx_f.OCFUCH = TMR4_OC_OCF_SET;
+        unOcmrh.OCMRx_f.OCFZRH = TMR4_OC_OCF_SET;
+        unOcmrh.OCMRx_f.OPDCH  = TMR4_OC_HOLD;
+        unOcmrh.OCMRx_f.OPPKH  = TMR4_OC_HIGH;
+        unOcmrh.OCMRx_f.OPUCH  = TMR4_OC_LOW;
+        unOcmrh.OCMRx_f.OPZRH  = TMR4_OC_HOLD;
+        unOcmrh.OCMRx_f.OPNPKH = TMR4_OC_LOW;
+        unOcmrh.OCMRx_f.OPNZRH = TMR4_OC_HOLD;
+        TMR4_OC_SetHighChCompareMode(CM_TMR4_3, TMR4_OC_CH_UH, unOcmrh);
+
+        /* UL: same PWM, EOP fields set for dual-channel match events */
+        unOcmrl.OCMRx = 0U;
+        unOcmrl.OCMRx_f.OCFDCL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OCFPKL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OCFUCL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OCFZRL  = TMR4_OC_OCF_SET;
+        unOcmrl.OCMRx_f.OPDCL   = TMR4_OC_HIGH;
+        unOcmrl.OCMRx_f.OPPKL   = TMR4_OC_HIGH;
+        unOcmrl.OCMRx_f.OPUCL   = TMR4_OC_LOW;
+        unOcmrl.OCMRx_f.OPZRL   = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.OPNPKL  = TMR4_OC_LOW;
+        unOcmrl.OCMRx_f.OPNZRL  = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPNDCL = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPNUCL = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPDCL  = TMR4_OC_HIGH;
+        unOcmrl.OCMRx_f.EOPPKL  = TMR4_OC_HIGH;
+        unOcmrl.OCMRx_f.EOPUCL  = TMR4_OC_LOW;
+        unOcmrl.OCMRx_f.EOPZRL  = TMR4_OC_HOLD;
+        unOcmrl.OCMRx_f.EOPNPKL = TMR4_OC_LOW;
+        unOcmrl.OCMRx_f.EOPNZRL = TMR4_OC_HOLD;
+        TMR4_OC_SetLowChCompareMode(CM_TMR4_3, TMR4_OC_CH_UL, unOcmrl);
+
+        TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UH, ENABLE);
+        TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UL, ENABLE);
+    }
+
+    /************************* PWM mode *************************/
     TMR4_PWM_StructInit(&stcTmr4PwmInit);
-    stcTmr4PwmInit.u16Mode     = TMR4_PWM_MD_DEAD_TMR;
     stcTmr4PwmInit.u16ClockDiv = TMR4_PWM_CLK_DIV1;
+
+    if (pConfig->mode == TMR4_OUTPUT_MODE_COMPLEMENTARY) {
+        stcTmr4PwmInit.u16Mode = TMR4_PWM_MD_DEAD_TMR;
+    } else {
+        stcTmr4PwmInit.u16Mode = TMR4_PWM_MD_THROUGH;
+    }
     TMR4_PWM_Init(CM_TMR4_3, TMR4_PWM_CH_U, &stcTmr4PwmInit);
 
-    TMR4_PWM_SetDeadTimeValue(CM_TMR4_3, TMR4_PWM_CH_U,
-                              TMR4_PWM_PDAR_IDX, TMR4_PWM_DEAD_TIME);
-    TMR4_PWM_SetDeadTimeValue(CM_TMR4_3, TMR4_PWM_CH_U,
-                              TMR4_PWM_PDBR_IDX, TMR4_PWM_DEAD_TIME);
+    /* Set output polarity */
+    TMR4_PWM_SetPolarity(CM_TMR4_3, TMR4_PWM_CH_U, pConfig->polarity);
+
+    /* Dead-time only applies in complementary mode */
+    if (pConfig->mode == TMR4_OUTPUT_MODE_COMPLEMENTARY) {
+        TMR4_PWM_SetDeadTimeValue(CM_TMR4_3, TMR4_PWM_CH_U,
+                                  TMR4_PWM_PDAR_IDX, pConfig->dead_time_rising);
+        TMR4_PWM_SetDeadTimeValue(CM_TMR4_3, TMR4_PWM_CH_U,
+                                  TMR4_PWM_PDBR_IDX, pConfig->dead_time_falling);
+    }
 
     s_bConfigured = true;
 }
@@ -105,6 +158,9 @@ void TMR4_PWM_StopOutput(void)
         return;
     }
     TMR4_Stop(CM_TMR4_3);
+    if (s_mode == TMR4_OUTPUT_MODE_SYNC) {
+        TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UH, DISABLE);
+    }
     TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UL, DISABLE);
 }
 
@@ -114,9 +170,15 @@ void TMR4_PWM_EmergencyStop(void)
         return;
     }
     TMR4_Stop(CM_TMR4_3);
+    if (s_mode == TMR4_OUTPUT_MODE_SYNC) {
+        TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UH, DISABLE);
+    }
     TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UL, DISABLE);
     TMR4_ClearCountValue(CM_TMR4_3);
     TMR4_OC_SetCompareValue(CM_TMR4_3, TMR4_OC_CH_UL, 0U);
+    if (s_mode == TMR4_OUTPUT_MODE_SYNC) {
+        TMR4_OC_SetCompareValue(CM_TMR4_3, TMR4_OC_CH_UH, 0U);
+    }
 }
 
 void TMR4_PWM_SetDuty(uint16_t u16Duty)
@@ -131,8 +193,11 @@ void TMR4_PWM_SetDuty(uint16_t u16Duty)
         u16Duty = TMR4_PWM_DUTY_MAX;
     }
 
-    u16Compare = (uint16_t)(((uint32_t)TMR4_PWM_PERIOD * u16Duty) /
+    u16Compare = (uint16_t)(((uint32_t)s_u16Period * u16Duty) /
                             TMR4_PWM_DUTY_MAX);
 
     TMR4_OC_SetCompareValue(CM_TMR4_3, TMR4_OC_CH_UL, u16Compare);
+    if (s_mode == TMR4_OUTPUT_MODE_SYNC) {
+        TMR4_OC_SetCompareValue(CM_TMR4_3, TMR4_OC_CH_UH, u16Compare);
+    }
 }
