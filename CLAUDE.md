@@ -127,9 +127,9 @@ The motor uses **TMRA_4** edge-aligned PWM with 4 channels on PB6-PB9 (CH3/CH4 p
 - Stop polarity: CH1/CH3 high-active at 50%, CH2/CH4 low-active at 50% (balanced stop)
 - Run polarity: all channels low-active — uses `Motor_SetRunPolarity()` to switch from stop mode
 
-### TMR4 Complementary PWM Driver (`Adp/tmr4_pwm.c/h`)
+### TMR4 PWM Driver (`Adp/tmr4_pwm.c/h`)
 
-A TMR4 unit 3 (CM_TMR4_3) on PB8/PB9 provides complementary PWM with hardware dead-time insertion. Two-parameter config:
+TMR4 unit 3 (CM_TMR4_3) on PB8/PB9. Two output modes, configurable via a single struct:
 
 ```c
 typedef struct {
@@ -139,16 +139,26 @@ typedef struct {
     bool               active_high;    // true = active high, false = active low
 } tmr4_pwm_config_t;
 
-void TMR4_PWM_Config(const tmr4_pwm_config_t *cfg);  // Init all parameters
-void TMR4_PWM_StartOutput(void);                      // Enable outputs
-void TMR4_PWM_StopOutput(void);                       // Disable outputs
-void TMR4_PWM_EmergencyStop(void);                    // Immediate all-off
-void TMR4_PWM_SetDuty(uint16_t u16Duty);              // Duty 0-10000 (0.00%-100.00%)
+void TMR4_PWM_Config(const tmr4_pwm_config_t *cfg);
+void TMR4_PWM_StartOutput(void);
+void TMR4_PWM_StopOutput(void);
+void TMR4_PWM_EmergencyStop(void);
+void TMR4_PWM_SetDuty(uint16_t u16Duty);              // 0-10000 = 0.00%-100.00%
 ```
 
-**Output types:**
-- `TMR4_OUTPUT_COMPLEMENTARY`: complementary pair + hardware dead-time via PDAR/PDBR. `dead_time_ns` converted to PCLK1 ticks internally via `CLK_GetBusClockFreq(CLK_BUS_PCLK1)` — immune to PCLK1 changes.
-- `TMR4_OUTPUT_SYNC`: same signal on both outputs. `dead_time_ns` ignored (no hardware dead-time in this mode). For external gate-driver ICs that handle dead-time internally.
+**Output types and dead-time behavior:**
+
+| output_type | PWM mode | Dead-time | Use case |
+|---|---|---|---|
+| `COMPLEMENTARY` | `DEAD_TMR` | `dead_time_ns` → PDAR/PDBR | Direct MOSFET drive, or pre-driver IC without built-in dead-time |
+| `SYNC` | `THROUGH` | Ignored (hardware doesn't support) | External gate-driver IC with built-in dead-time, or optocoupler |
+
+**Internals:**
+- Counter: `TMR4_MD_TRIANGLE` (center-aligned). Period formula: `PCLK1 / (freq_hz × 2)`.
+- Dead-time conversion: `ticks = dead_time_ns × PCLK1 / 1e9`. Reads PCLK1 via `CLK_GetBusClockFreq(CLK_BUS_PCLK1)` at Config time — immune to Sysclk.h macro changes.
+- Polarity: `active_high=true` → `OXH_HOLD_OXL_HOLD`, `false` → `OXH_INVT_OXL_INVT`.
+- SYNC mode OC configuration follows HC32 official example `timer4_pwm_through` (UH compare mode 0x225F, UL compare mode 0x2250_225F, buffer cond `PEAK`).
+- Reference: `F:/HC32F460_folder/HC32F460_DDL_Rev3.3.0/projects/ev_hc32f460_lqfp100_v2/examples/timer4/timer4_pwm_through/`
 
 ### Motor Ramp Control
 
