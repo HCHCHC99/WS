@@ -119,7 +119,7 @@
     //   Motor_Pwm_Init();
 	  tickTimer_DelayMs(5);
       static const tmr4_pwm_config_t pwm_cfg = {
-          .output_type  = TMR4_OUTPUT_COMPLEMENTARY,
+          .output_type  = TMR4_OUTPUT_SYNC,
           .freq_hz      = 50000,
           .dead_time_ns = 1000,
           .active_high  = true,

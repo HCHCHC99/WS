@@ -60,15 +60,10 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
     TMR4_StructInit(&stcTmr4Init);
     stcTmr4Init.u16ClockDiv = TMR4_CLK_DIV1;
 
-    if (pConfig->output_type == TMR4_OUTPUT_SYNC) {
-        /* THROUGH mode requires triangle wave (per HC32 official example) */
-        stcTmr4Init.u16CountMode = TMR4_MD_TRIANGLE;
-        stcTmr4Init.u16PeriodValue = (uint16_t)(u32TimerClock / (pConfig->freq_hz * 2U)) - 1U;
-        s_u16Period = (uint16_t)(u32TimerClock / (pConfig->freq_hz * 2U));
-    } else {
-        stcTmr4Init.u16CountMode = TMR4_MD_SAWTOOTH;
-        stcTmr4Init.u16PeriodValue = s_u16Period - 1U;
-    }
+    /* Triangle wave: one PWM cycle = 2 * period ticks */
+    stcTmr4Init.u16CountMode = TMR4_MD_TRIANGLE;
+    s_u16Period = (uint16_t)(u32TimerClock / (pConfig->freq_hz * 2U));
+    stcTmr4Init.u16PeriodValue = s_u16Period - 1U;
     TMR4_Init(CM_TMR4_3, &stcTmr4Init);
 
     /************************* OC channels *************************/
