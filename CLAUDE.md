@@ -57,7 +57,7 @@ rs485.c/h              — Pure hardware: USART4 + PA03 direction pin + ISRs
 
 - **Param Manager** (`Utils/param_manager.h`): Register-based parameter storage with Flash persistence. Parameters live in `g_AppParam` (type `AppParamRecord_t`). Read/write via `Param_ReadByReg()`/`Param_WriteByReg()`, save via `Param_Save()`. Uses wear-leveled Flash storage across sectors 56-62 with CRC32 validation, sequence numbers, and magic headers.
 
-- **Motor arbitration** (`Dev/dev_motor.c`): Commands go through the motor arbitrator which decides whether to allow based on mode (auto/remote/manual). Uses a `block_fwd`/`block_rev` bitmask — multiple devices can independently block a direction (e.g., overcurrent adds `DEV_ID_OVERCUR_FWD`, limit switches add `DEV_ID_RTURN_FWD`). Arbitration re-evaluates on every block/unblock.
+- **Motor arbitration** (`Dev/dev_motor.c`): Commands go through the motor arbitrator which decides whether to allow based on mode (auto/remote/manual). Uses `block_fwd`/`block_rev` arrays (`MotorCommandList_t`) — multiple devices can independently block a direction (e.g., overcurrent adds `DEV_ID_OVERCUR_FWD`, limit switches add `DEV_ID_RTURN_FWD`). Arbitration re-evaluates on every block/unblock. Priority order: EMERGENCY(0) > LIMIT(2) > MANUAL(3) > CAN(4) > POWER(5).
 
 - **Simulation mode** (`ENABLE_SIMULATION_MODE=1` in `App_Motor_Project.c`): Enabled by default. The `g_sim` struct holds simulated hardware signals (power, Hall limits, IO buttons, ADC values). The main loop detects state changes on `g_sim` and publishes corresponding EventBus events, allowing full motor arbitration testing without physical hardware.
 
@@ -70,10 +70,14 @@ Fault bits (stored in `g_RealTimeData.fault_status`, readable via Modbus registe
 | Bit | Macro | Description |
 |-----|-------|-------------|
 | bit0 | `FAULT_BIT_OVERVOLTAGE` | Overvoltage |
-| bit2 | `FAULT_BIT_OVERCURRENT` | Overcurrent |
-| bit4 | `FAULT_BIT_OVERTEMP` | Overtemp |
-| bit6 | `FAULT_BIT_UNDERVOLTAGE` | Undervoltage |
+| bit1 | `FAULT_BIT_OVERCURRENT` | Overcurrent |
+| bit2 | `FAULT_BIT_OVERTEMP` | Overtemp (reserved, not currently used) |
+| bit3 | `FAULT_BIT_RESET` | Reset |
+| bit4 | `FAULT_BIT_OVERLOAD` | Overload |
 | bit5 | `FAULT_BIT_STALL` | Motor stall |
+| bit6 | `FAULT_BIT_UNDERVOLTAGE` | Undervoltage |
+
+**Note:** Fault bit definitions are inconsistent across code comments and documentation. The `实时数据使用说明.md` maps OVERCURRENT to bit1, while `电流控制逻辑说明.md` maps it to bit2. The authoritative source is the actual `#define FAULT_BIT_*` macros in the source — verify those before trusting any documentation.
 
 - `App_FaultHandler` subscribes to `TOPIC_VOLTAGE_ALARM` and `TOPIC_CURRENT_ALARM`, sets/clears fault bits in realtime data
 - Overcurrent triggers **dual blocking**: dev_motor blocks forward via `DEV_ID_OVERCUR_FWD`, dev_rturn also blocks via `TOPIC_RTURN_LIMIT` for redundancy
@@ -104,68 +108,62 @@ Typical sequence: START (0x0001) → FWD (0x0011) → STOP (0x0002)
 - Realtime data (`g_RealTimeData`) is RAM-only, **not persisted to Flash** — lost on power cycle
 - Multi-register writes (0x10) reject batches that include `REG_CTRL_CMD` or `REG_FAULT_STATUS` — those must use single writes (0x06)
 
-## BLDC Motor Control — TMR4 Six-Step Commutation
+## Motor Control Architecture
 
-The motor control layer uses TMR4 timer (CM_TMR4_1) for six-step block commutation. This replaced the original TMRA_4 edge-aligned PWM. TMR4 provides 6 complementary output channels (UH/UL, VH/VL, WH/WL) on PB4-PB9 with dead-time insertion.
+### PWM Output (TMRA_4)
 
-### Mode Selection Macros (`App_Motor_Project.h`)
+The motor uses **TMRA_4** edge-aligned PWM with 4 channels on PB6-PB9 (CH3/CH4 partially commented out in the stop path):
 
-| Macro | Default | Description |
-|-------|---------|-------------|
-| `MOTOR_HALL_TRIPLE_ENABLE` | `0` (in `motor_hall.h`) | `0` = dual Hall (PA9, PA10), `1` = triple Hall (PA8, PA9, PA10). Gates all Hall C code and commutation path |
-| `MOTOR_COMMUTATION_SENSORLESS` | `0` | `0` = Hall-dependent commutation, `1` = open-loop timed commutation. Only active when `MOTOR_HALL_TRIPLE_ENABLE=1` |
-| `ENABLE_SIMULATION_MODE` | `1` | Simulation mode (no physical hardware needed) |
+| Channel | Pin | Active Polarity |
+|---------|-----|-----------------|
+| CH1 | PB6 | Low-active |
+| CH2 | PB7 | Low-active |
+| CH3 | PB8 | Low-active (partially disabled) |
+| CH4 | PB9 | Low-active (partially disabled) |
 
-**Three compilation paths** controlled by these macros:
+- PWM frequency: configured via `PWM_Init()` (typically 20kHz)
+- Duty cycle range: 2%–98% (`MOTOR_DUTY_MIN`/`MOTOR_DUTY_MAX`)
+- Ramp time: 800ms (`MOTOR_RAMP_TIME_MS`) — uses `PWM_StartRamp_TargetFromStart()` for smooth speed changes
+- Stop polarity: CH1/CH3 high-active at 50%, CH2/CH4 low-active at 50% (balanced stop)
+- Run polarity: all channels low-active — uses `Motor_SetRunPolarity()` to switch from stop mode
 
-```
-MOTOR_HALL_TRIPLE_ENABLE=0:  Original TMRA_4 PWM (PWM_Update + Motor_RampForward/Reverse)
-MOTOR_HALL_TRIPLE_ENABLE=1 + MOTOR_COMMUTATION_SENSORLESS=0:  TMR4 + Hall GPIO read (PA8/9/10)
-MOTOR_HALL_TRIPLE_ENABLE=1 + MOTOR_COMMUTATION_SENSORLESS=1:  TMR4 + timed step advance (open-loop)
-```
+### TMR4 Complementary PWM Driver (`Adp/tmr4_pwm.c/h`)
 
-### Open-Loop Timing Config
-
-When `MOTOR_COMMUTATION_SENSORLESS=1`, commutation step interval scales linearly with duty cycle:
-- `COMM_STEP_INTERVAL_MIN_US` (800us) → used at 100% duty (fastest)
-- `COMM_STEP_INTERVAL_MAX_US` (5000us) → used at 0% duty (slowest)
-- Interval = MAX_US/1000 - ((MAX_US - MIN_US)/1000) * duty / 100 (in ms ticks)
-
-### Key Files
-
-| File | Role |
-|------|------|
-| `Adp/Template_tmr4_pwm.c/h` | TMR4 PWM config + six-step commutation tables + open-loop step advance |
-| `Adp/Motor_hall.c/h` | Hall sensor driver: GPIO interrupts on PA8/9/10, RPM/direction calculation |
-| `Dev/dev_motor_hall.c/h` | Device-layer wrapper for Hall sensor, `MotorHall_Device_t` struct |
-| `Dev/dev_motor.c` | Motor arbitrator: `Motor_Update()` dispatches to TMR4 or TMRA based on macros |
-| `App/App_Motor_Project.c/h` | Hardware pin definitions, device registration, simulation data |
-
-### Commutation Tables (`Template_tmr4_pwm.c`)
-
-Forward sequence (hall_state order): **5→4→6→2→3→1**
-```
-Hall 101(5): U→W    Hall 100(4): U→V    Hall 110(6): W→V
-Hall 010(2): W→U    Hall 011(3): V→U    Hall 001(1): V→W
-```
-
-Reverse sequence (hall_state order): **1→3→2→6→4→5** (reversed pairs)
-
-Open-loop `TMR4_PWM_CommutationNextStep(direction)` advances through a step index (0-5) and maps to the corresponding hall_state to reuse the same `TMR4_PWM_CommutationStep()` function.
-
-### TMR4 API Summary
+A TMR4 unit 3 (CM_TMR4_3) on PB8/PB9 provides complementary PWM with hardware dead-time insertion. Two-parameter config:
 
 ```c
-void TMR4_PWM_Config(void);                          // Init TMR4, GPIOs, dead-time
-void TMR4_PWM_StartOutput(void);                     // Enable all 6 channels
-void TMR4_PWM_StopOutput(void);                      // Disable all outputs
-void TMR4_PWM_EmergencyStop(void);                   // Immediate all-off
-void TMR4_PWM_CommutationStep(hall_state, dir);      // Set one commutation sector
-void TMR4_PWM_SetCommutationDuty(uint16_t duty);      // duty 0-10000 (0.00%-100.00%)
-void TMR4_PWM_CommutationStop(void);                  // Clear all, reset state
-void TMR4_PWM_CommutationNextStep(uint8_t dir);       // Open-loop: advance to next step
-void TMR4_PWM_CommutationResetSequence(void);         // Open-loop: reset step index
+typedef struct {
+    tmr4_output_type_t output_type;    // TMR4_OUTPUT_COMPLEMENTARY or TMR4_OUTPUT_SYNC
+    uint16_t           freq_hz;        // PWM frequency in Hz
+    uint16_t           dead_time_ns;   // Dead-time in nanoseconds (complementary mode only)
+    bool               active_high;    // true = active high, false = active low
+} tmr4_pwm_config_t;
+
+void TMR4_PWM_Config(const tmr4_pwm_config_t *cfg);  // Init all parameters
+void TMR4_PWM_StartOutput(void);                      // Enable outputs
+void TMR4_PWM_StopOutput(void);                       // Disable outputs
+void TMR4_PWM_EmergencyStop(void);                    // Immediate all-off
+void TMR4_PWM_SetDuty(uint16_t u16Duty);              // Duty 0-10000 (0.00%-100.00%)
 ```
+
+**Output types:**
+- `TMR4_OUTPUT_COMPLEMENTARY`: complementary pair + hardware dead-time via PDAR/PDBR. `dead_time_ns` converted to PCLK1 ticks internally via `CLK_GetBusClockFreq(CLK_BUS_PCLK1)` — immune to PCLK1 changes.
+- `TMR4_OUTPUT_SYNC`: same signal on both outputs. `dead_time_ns` ignored (no hardware dead-time in this mode). For external gate-driver ICs that handle dead-time internally.
+
+### Motor Ramp Control
+
+Motor speed is controlled via `Motor_RampForward()`/`Motor_RampReverse()` in `Dev/dev_motor.c`. These `__weak` callbacks:
+1. Call `Motor_LimitDuty()` to clamp to 2%–98%
+2. Switch from stop polarity to run polarity via `Motor_SetRunPolarity()`
+3. Kick off a PWM ramp via `PWM_StartRamp_TargetFromStart()`
+4. On PWM ramp completion callback, set final duty via `Motor_SetRunDutyDirect()`
+
+### Hall Sensor (`Adp/Motor_hall.c/h`)
+
+- Configuration: `motor_hall_config_t` struct with GPIO, interrupt, pole-pairs, and hall-count fields
+- Dual Hall sensors on PA9 (Hall A, EXTINT_CH09, INT009_IRQn) and PA10 (Hall B, EXTINT_CH10, INT010_IRQn)
+- Hall count: 2 (`DEFAULT_HALL_COUNT`), pole pairs: 3 (`DEFAULT_POLE_PAIRS`)
+- RPM calculation: uses both edges per hall pulse via `CALC_PULSES_PER_REV`
 
 ### Hall Sensor IRQ Names (HC32F460)
 
@@ -174,13 +172,38 @@ Correct interrupt names (no underscore between INT and number):
 - `INT009_IRQn` for PA9 (EXTINT_CH09)
 - `INT010_IRQn` for PA10 (EXTINT_CH10)
 
-### Known Limitations
+### Key Motor Files
 
-- **Dual Hall fallback is broken**: When `MOTOR_HALL_TRIPLE_ENABLE=0`, `Motor_OnArbitrationFwd/Rev` still call `Motor_RampForward/Reverse`, but the TMRA path in `Motor_Update` remains functional via `#else` blocks. The callbacks are wrapped in `#if MOTOR_HALL_TRIPLE_ENABLE` / `#else` preserving both paths.
-- **Hall state 000/111**: When Hall sensors fail (all high or all low), commutation is skipped (guarded by `hall_state >= 1 && hall_state <= 6`).
-- **File encoding**: Source files use GBK encoding for Chinese comments. The Read/Edit/Write tools operate in UTF-8 only — **never edit .c/.h files directly** or Chinese comments will be permanently corrupted. Always use the GBK-safe edit workflow below.
+| File | Role |
+|------|------|
+| `Adp/Pwm.c/h` | PWM driver with ramp (TMRA_4 channels) |
+| `Adp/Template_Pwm.c/h` | PWM HAL config helpers |
+| `Adp/tmr4_pwm.c/h` | TMR4 complementary PWM (standalone driver) |
+| `Adp/Motor_hall.c/h` | Hall sensor driver: GPIO interrupts, RPM/direction calculation |
+| `Adp/Timer0_Unit1.c/h` | Timer0 unit 1 — timebase and timing |
+| `Adp/timer6_timebase.c/h` | TMR6 timebase — system tick generation |
+| `Dev/dev_motor.c/h` | Motor arbitrator: block/allow lists, direction arbitration, ramp callbacks |
+| `Dev/dev_motor_hall.c/h` | Device-layer wrapper for Hall sensor |
+| `App/App_Motor_Project.c/h` | Hardware pin definitions, device registration, simulation data |
+| `Utils/Params.h` | Modbus register map definitions (REG_*) + Flash record layout (`AppParamRecord_t`) |
+| `Utils/rtt_manager.h` | Per-module debug macro switches (enable via uncommenting `#define` lines) |
+| `RTT/rtt_log.h` | Central debug macros: `MAIN_D()`, `COMM_DBG()`, `HAL_DEBUG()` |
 
-### GBK-Safe Edit Workflow (MANDATORY for .c/.h files)
+### RTT Debug Switch Mechanism (`Utils/rtt_manager.h`)
+
+Each module has a commented-out `#define MODULE_NAME` line. Uncomment to enable debug output via RTT:
+
+```
+// #define DEV_MOTOR       → uncomment to enable motor debug
+// #define ADP_RS485_DEBUG → uncomment to enable RS485 debug
+#define DEV_SENSOR          → currently enabled (high-frequency sensor output)
+```
+
+Also provides `INTERVAL_DECLARE()` macro for rate-limited debug printing to avoid flooding the RTT channel at high frequencies.
+
+### GBK File Encoding & Safe Edit Workflow (MANDATORY for .c/.h files)
+
+Source files use GBK encoding for Chinese comments. The Read/Edit/Write tools operate in UTF-8 only — **never edit .c/.h files directly** or Chinese comments will be permanently corrupted. Always use this 3-step process:
 
 Every edit to a `.c` or `.h` file MUST follow this 3-step process:
 
@@ -199,9 +222,22 @@ If `iconv` fails with "cannot convert" on Step 1, the file is already corrupted 
 
 **For new files**: Write directly in UTF-8, then convert to GBK with `iconv -f UTF-8 -t GBK`.
 
+## Register Map
+
+The authoritative register definitions are in `Utils/Params.h` — both the `REG_*` address macros and the `AppParamRecord_t` struct that gets persisted to Flash. The register layout:
+
+| Range | Type | Read/Write |
+|-------|------|------------|
+| 0x2710–0x271F | Persisted params (Flash) | R/W via 0x03/0x06/0x10 |
+| 0x2720 | Control command | Write-only via 0x06 |
+| 0x2730–0x273F | Realtime data (RAM) | Read-only via 0x03 |
+| 0x2740 | Fault status | R/W via 0x06 |
+
+See `Utils/Params.h` for the full list of `REG_*` constants and `AppParamRecord_t` field layout.
+
 ## Documentation
 
 - `ws_v.1.1/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
 - `ws_v.1.1/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
 - `ws_v.1.1/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
-- `ws_v.1.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames
+- `ws_v.1.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames for testing (`python modbus_test_cmds.py` to see examples)

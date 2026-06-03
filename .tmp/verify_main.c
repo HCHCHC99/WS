@@ -18,7 +18,7 @@
   #include "tmr4_pwm.h"
 
 //   /*=============================================================================
-//    * ȫ��PWMʵ�������������ʹ�ã�?
+//    * 全锟斤拷PWM实锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟绞癸拷茫锟?
 //    *=============================================================================*/
   pwm_t g_motor_pwm_ch1;  // PB6
   pwm_t g_motor_pwm_ch2;  // PB7
@@ -26,77 +26,77 @@
   pwm_t g_motor_pwm_ch4;  // PB9
 
 //   /*=============================================================================
-//    * ��������
+//    * 锟斤拷锟斤拷锟斤拷锟斤拷
 //    *=============================================================================*/
 //   static void Motor_Pwm_Init(void);
 
 //   /*=============================================================================
-//    * ��ʼ����������õ�PWM��4��ͨ����ȫ������Ч��
+//    * 锟斤拷始锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷玫锟絇WM锟斤拷4锟斤拷通锟斤拷锟斤拷全锟斤拷锟斤拷锟斤拷效锟斤拷
 //    *=============================================================================*/
 //   static void Motor_Pwm_Init(void)
 //   {
-//       // ����������?4��ͨ��ȫ������Ч������תͨ��ռ�ձȷ���ʵ�֣�
-//       // Ƶ�ʣ�20kHz����ʼռ�ձȣ�0%
+//       // 锟斤拷锟斤拷锟斤拷锟斤拷锟揭?4锟斤拷通锟斤拷全锟斤拷锟斤拷锟斤拷效锟斤拷锟斤拷锟斤拷转通锟斤拷占锟秸比凤拷锟斤拷实锟街ｏ拷
+//       // 频锟绞ｏ拷20kHz锟斤拷锟斤拷始占锟秸比ｏ拷0%
 
-//       // ����GPIO���裨�����޸�GPIO�������ã�
+//       // 锟斤拷锟斤拷GPIO锟斤拷锟借（锟斤拷锟斤拷锟睫革拷GPIO锟斤拷锟斤拷锟斤拷锟矫ｏ拷
 //       LL_PERIPH_WE(LL_PERIPH_GPIO);
 
-//       // CH1: PB6 - ����Ч
+//       // CH1: PB6 - 锟斤拷锟斤拷效
 //       g_motor_pwm_ch1 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH1,
 //                                   GPIO_PORT_B, GPIO_PIN_06, GPIO_FUNC_4,
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // CH2: PB7 - ����Ч
+//       // CH2: PB7 - 锟斤拷锟斤拷效
 //       g_motor_pwm_ch2 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH2,
 //                                   GPIO_PORT_B, GPIO_PIN_07, GPIO_FUNC_4,
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // CH3: PB8 - ����Ч
+//       // CH3: PB8 - 锟斤拷锟斤拷效
 //       g_motor_pwm_ch3 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH3,
 //                                   GPIO_PORT_B, GPIO_PIN_08, GPIO_FUNC_4,
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // CH4: PB9 - ����Ч
+//       // CH4: PB9 - 锟斤拷锟斤拷效
 //       g_motor_pwm_ch4 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH4,
 //                                   GPIO_PORT_B, GPIO_PIN_09, GPIO_FUNC_4,
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // ����GPIO���裨������ú�������?
+//       // 锟斤拷锟斤拷GPIO锟斤拷锟借（锟斤拷锟斤拷锟斤拷煤锟斤拷锟斤拷锟斤拷锟?
 //       LL_PERIPH_WP(LL_PERIPH_GPIO);
 
-//       // ����FCG���裨ʹ�ܶ�ʱ��ʱ�ӣ�
+//       // 锟斤拷锟斤拷FCG锟斤拷锟借（使锟杰讹拷时锟斤拷时锟接ｏ拷
 //       LL_PERIPH_WE(LL_PERIPH_FCG);
 
-//       // ��������PWM��ʱ��
+//       // 锟斤拷锟斤拷锟斤拷锟斤拷PWM锟斤拷时锟斤拷
 //       PWM_Start(&g_motor_pwm_ch1);
 //       PWM_Start(&g_motor_pwm_ch2);
 //       PWM_Start(&g_motor_pwm_ch3);
 //       PWM_Start(&g_motor_pwm_ch4);
 
-//       // ʹ�����?
+//       // 使锟斤拷锟斤拷锟?
 //       PWM_OutputCmd(&g_motor_pwm_ch1, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch2, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch3, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch4, PWM_OUTPUT_ENABLE);
 
-//       // ����FCG����
+//       // 锟斤拷锟斤拷FCG锟斤拷锟斤拷
 //       LL_PERIPH_WP(LL_PERIPH_FCG);
 
 //       MAIN_D("Motor PWM initialized: 4 channels, 20kHz, low active\r\n");
 //   }
 
   /*=============================================================================
-   * ������
+   * 锟斤拷锟斤拷锟斤拷
    *=============================================================================*/
   int main(void)
   {
       Hardware_Init();
 
-      /* ͨ��ջ��ʼ�� (RS485 + Modbus RTU) */
+      /* 通锟斤拷栈锟斤拷始锟斤拷 (RS485 + Modbus RTU) */
       static const App_Comm_Config_t comm_cfg = {
           .phy.baudrate     = 9600,
           .phy.dir_polarity = 0,
@@ -112,10 +112,10 @@
 
       ESystem_Init();
 
-      /* ��ʼ�����ϴ����������ĵ�ѹ/�����¼������¹����룩 */
+      /* 锟斤拷始锟斤拷锟斤拷锟较达拷锟斤拷锟斤拷锟斤拷锟斤拷锟侥碉拷压/锟斤拷锟斤拷锟铰硷拷锟斤拷锟斤拷锟铰癸拷锟斤拷锟诫） */
       FaultHandler_Init();
 
-      /* ��ʼ�����PWM���ڵ���豸��ʼ���ǰ��? */
+      /* 锟斤拷始锟斤拷锟斤拷锟絇WM锟斤拷锟节碉拷锟斤拷璞革拷锟绞硷拷锟街前锟斤? */
     //   Motor_Pwm_Init();
 	  tickTimer_DelayMs(5);
       static const tmr4_pwm_config_t pwm_cfg = {
@@ -126,29 +126,30 @@
       };
       TMR4_PWM_Config(&pwm_cfg);
 
-      MAIN_D("[MAIN] TMR4 Config done, starting output");
       TMR4_PWM_StartOutput();
 
       /*=========================================================================
-       * �������ģʽ����������Keil Watch�������޸ģ�
-       * 0: ֹͣ, 1: ��ת, 2: ��ת
+       * 锟斤拷锟斤拷锟斤拷锟侥Ｊ斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟終eil Watch锟斤拷锟斤拷锟斤拷锟睫改ｏ拷
+       * 0: 停止, 1: 锟斤拷转, 2: 锟斤拷转
        *=========================================================================*/
       // volatile uint8_t motor_mode = 0;
 
-      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��?
+      // MotorDevice_t* motor = NULL;       // TODO: 锟斤拷取锟斤拷锟斤拷璞钢革拷锟?
       EventBus_Enable();
-	
+
       while (1)
       {
           ESystem_MainLoop();
           App_Comm_Poll();
           TMR4_PWM_SetDuty(2500);
 
+          // 锟斤拷锟斤拷PWM状态锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
         //   PWM_Update(&g_motor_pwm_ch1);
         //   PWM_Update(&g_motor_pwm_ch2);
         //   PWM_Update(&g_motor_pwm_ch3);
         //   PWM_Update(&g_motor_pwm_ch4);
 
+          // // 每锟斤拷循锟斤拷锟斤拷锟斤拷锟斤拷 motor_mode 锟斤拷锟矫讹拷应锟斤拷锟斤拷
           // if (motor_mode == 0) {
           //     Motor_OnArbitrationStop(motor);
           // } else if (motor_mode == 1) {
@@ -156,7 +157,7 @@
           // } else if (motor_mode == 2) {
           //     Motor_OnArbitrationRev(motor, 0.0f);
           // }
-          tickTimer_DelayMs(500);
+          Param_PrintAllValues();
       }
   }
   

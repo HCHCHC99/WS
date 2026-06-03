@@ -22,12 +22,12 @@
  *   UTILS_*  - 工具层 (Utils)
  *============================================================================*/
 
-#define PARAM_PRINT_DBG             /* 参数定时打印 (每5秒打印一次) */   // 添加这行
+// #define PARAM_PRINT_DBG             /* 参数定时打印 (每5秒打印一次) */   // 添加这行
 
  /*=============================================================================
  * App_FaultHandler 调试宏
  *============================================================================*/
-#define APP_FAULT_HANDLER_DBG
+// #define APP_FAULT_HANDLER_DBG
 
 /*=============================================================================
  * [ADP] 硬件适配层调试开关
@@ -65,10 +65,10 @@
 // #define DEV_HALL                    /* 霍尔传感器 */
 // #define DEV_VOLTAGE                 /* 电压 */
 // #define DEV_ADC                     /* ADC */
-#define DEV_SENSOR                  /* 传感器(高频) */
-#define DEV_SENSOR_REAL             /* 传感器真实模式调试(ADC采样+过流检测) */
-#define DEV_SENSOR_SLOW             /* 传感器(慢速) */
-#define DEBUG_SENSOR_SLOW
+// #define DEV_SENSOR                  /* 传感器(高频) */
+// #define DEV_SENSOR_REAL             /* 传感器真实模式调试(ADC采样+过流检测) */
+// #define DEV_SENSOR_SLOW             /* 传感器(慢速) */
+// #define DEBUG_SENSOR_SLOW
 // #define DEV_MOTOR_HALL              /* 电机霍尔 */
 // #define DEV_MOTOR_HALL_OUTPUT       /* 电机霍尔输出 */
 

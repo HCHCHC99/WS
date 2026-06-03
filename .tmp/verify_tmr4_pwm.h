@@ -2,7 +2,6 @@
 #define __TMR4_PWM_H__
 
 #include "main.h"
-#include <stdbool.h>
 
 /*=============================================================================
  * TMR4 unit 3 complementary PWM on PB9 (TIM4_3_OUH) and PB8 (TIM4_3_OUL)

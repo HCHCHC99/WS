@@ -4,13 +4,13 @@
 #include <string.h>
 #include <stdlib.h>
 
-// ========== Ä£ÄâÄ£Ê½È«¾Ö±äÁ¿ ==========
+// ========== æ¨¡æ‹Ÿæ¨¡å¼å…¨å±€å˜é‡ ==========
 #ifdef SENSOR_SIMULATION_MODE
-    // Ä£ÄâµÄÊÇ´«¸ĞÆ÷Ô­Ê¼Êä³öµçÑ¹£¨mV£©£¬²»ÊÇADCÊäÈëµçÑ¹
+    // æ¨¡æ‹Ÿçš„æ˜¯ä¼ æ„Ÿå™¨åŸå§‹è¾“å‡ºç”µå‹ï¼ˆmVï¼‰ï¼Œä¸æ˜¯ADCè¾“å…¥ç”µå‹
     static volatile uint16_t s_u16SimSensorRawMv = 1650;
     volatile uint16_t* const g_pu16DbgSimSensorRawMv = &s_u16SimSensorRawMv;
     
-    // ¸ù¾İ´«¸ĞÆ÷Ô­Ê¼µçÑ¹¼ÆËãADCÊäÈëµçÑ¹£¨¿¼ÂÇ·ÖÑ¹µçÂ·£©
+    // æ ¹æ®ä¼ æ„Ÿå™¨åŸå§‹ç”µå‹è®¡ç®—ADCè¾“å…¥ç”µå‹ï¼ˆè€ƒè™‘åˆ†å‹ç”µè·¯ï¼‰
     static uint16_t Sensor_Sim_GetAdcVoltageMv(uint16_t u16SensorRawMv) {
 #if SENSOR_VOLTAGE_DIVIDER_ENABLE
         // V_adc = V_sensor * R2 / (R1 + R2)
@@ -20,9 +20,9 @@
 #endif
     }
     
-    // ¸ù¾İÆÚÍûµçÁ÷ÖµÉèÖÃÄ£ÄâÖµ£¨¸üÖ±¹ÛµÄ½Ó¿Ú£©
+    // æ ¹æ®æœŸæœ›ç”µæµå€¼è®¾ç½®æ¨¡æ‹Ÿå€¼ï¼ˆæ›´ç›´è§‚çš„æ¥å£ï¼‰
     static void Sensor_Sim_SetCurrent(int32_t s32CurrentMa) {
-        // ·´Ïò¼ÆËã£ºCurrent -> ´«¸ĞÆ÷Ô­Ê¼µçÑ¹
+        // åå‘è®¡ç®—ï¼šCurrent -> ä¼ æ„Ÿå™¨åŸå§‹ç”µå‹
         // V_sensor = ZeroPoint + Current * Sensitivity
         int32_t s32SensorRawMv = SENSOR_RAW_ZERO_MV + 
                                   (s32CurrentMa * SENSOR_RAW_SENSITIVITY_MV_PER_A) / 1000;
@@ -36,13 +36,13 @@
     #define SIM_ADC_RAW_VALUE(voltage)  ((uint16_t)((uint32_t)(voltage) * 4095 / 3300))
 #endif
 
-// ========== ÂıËÙ´òÓ¡ ==========
+// ========== æ…¢é€Ÿæ‰“å° ==========
 #ifdef DEBUG_SENSOR_SLOW
     static uint32_t s_u32LastSlowPrintTime = 0;
     #define SLOW_PRINT_INTERVAL_MS   4000
 #endif
 
-// ========== ÕæÊµÄ£Ê½µ÷ÊÔ ==========
+// ========== çœŸå®æ¨¡å¼è°ƒè¯• ==========
 #ifdef DEV_SENSOR_REAL
     static NonBlockingDelay_t s_stcRealDbgTimer;
     static uint8_t s_u8RealDbgTimerInit = 0;
@@ -63,7 +63,7 @@
     }
 #endif
 
-// ========== ´°¿Úµ÷ÊÔ»º³åÇø ==========
+// ========== çª—å£è°ƒè¯•ç¼“å†²åŒº ==========
 #ifdef DEBUG_SENSOR_WINDOW_BUFFER
     volatile uint16_t g_u16DbgSensorBuffer[SENSOR_WINDOW_BUFFER_SIZE] = {0};
     volatile uint16_t g_u16DbgSensorBufIndex = 0;
@@ -96,7 +96,7 @@
     }
 #endif
 
-// ========== Ğ£×¼¾²Ì¬º¯Êı ==========
+// ========== æ ¡å‡†é™æ€å‡½æ•° ==========
 static void Sensor_CalibrateZeroInternal(Sensor_Device_t* pstcDev, uint16_t u16AdcVoltageMv) {
     if (!pstcDev) return;
     
@@ -105,13 +105,13 @@ static void Sensor_CalibrateZeroInternal(Sensor_Device_t* pstcDev, uint16_t u16A
     int32_t s32ZeroOffset = 0;
 
 #if SENSOR_TYPE_DIFF_AMP_ENABLE
-    // ²î·Ö·Å´óÆ÷Ä£Ê½£ºÀíÂÛÁãµã¾ÍÊÇ 0mV£¨»òÕßÓ²¼şÉÏµÄÎ¢Ğ¡Ê§µ÷£©
-    // Æ«ÒÆÁ¿ = Êµ²âµçÑ¹ - 0
+    // å·®åˆ†æ”¾å¤§å™¨æ¨¡å¼ï¼šç†è®ºé›¶ç‚¹å°±æ˜¯ 0mVï¼ˆæˆ–è€…ç¡¬ä»¶ä¸Šçš„å¾®å°å¤±è°ƒï¼‰
+    // åç§»é‡ = å®æµ‹ç”µå‹ - 0
     s32ZeroOffset = s32ZeroMeas;
     SENSOR_DEBUG("DiffAmp Calib: Meas=%ld mV, Offset=%ld mV\r\n",
                  (long)s32ZeroMeas, (long)s32ZeroOffset);
 #else
-    // »ô¶û´«¸ĞÆ÷Ä£Ê½£ºÀíÂÛÁãµã 1650mV
+    // éœå°”ä¼ æ„Ÿå™¨æ¨¡å¼ï¼šç†è®ºé›¶ç‚¹ 1650mV
     s32ZeroOffset = s32ZeroMeas - s32ZeroTheory;
     SENSOR_DEBUG("Hall Calib: V_theory=%ld mV, V_meas=%ld mV, ZeroOffset=%ld mV\r\n",
                  (long)s32ZeroTheory, (long)s32ZeroMeas, (long)s32ZeroOffset);
@@ -121,37 +121,37 @@ static void Sensor_CalibrateZeroInternal(Sensor_Device_t* pstcDev, uint16_t u16A
     pstcDev->stcCalibration.s32CalibrationValid = 0x5A5A5A5A;
 }
 
-// ========== µçÁ÷¼ÆËã¾²Ì¬º¯Êı ==========
+// ========== ç”µæµè®¡ç®—é™æ€å‡½æ•° ==========
 static int32_t Sensor_CalcCurrentInternal(Sensor_Device_t* pstcDev, uint16_t u16AdcVoltageMv) {
     if (!pstcDev) return 0;
     
     int32_t s32CurrentMa = 0;
-    int32_t s32ZeroTheory = SENSOR_VOUT_ZERO_MA_INT; // ÀíÂÛÁãµã
-    int32_t s32Sensitivity = SENSOR_SENSITIVITY_INT; // ÁéÃô¶È mV/A
+    int32_t s32ZeroTheory = SENSOR_VOUT_ZERO_MA_INT; // ç†è®ºé›¶ç‚¹
+    int32_t s32Sensitivity = SENSOR_SENSITIVITY_INT; // çµæ•åº¦ mV/A
 
 #if SENSOR_TYPE_DIFF_AMP_ENABLE
-    // ===== ²î·Ö·Å´óÆ÷Ä£Ê½ =====
-    // ²î·Ö·Å´óÆ÷Í¨³£Ö»ÓĞÎ¢Ğ¡Ê§µ÷£¬Áãµã½üËÆ0¡£µ«ÎªÁËÖ§³ÖĞ£×¼£¬ÒÀÈ»Ê¹ÓÃ ZeroOffset
+    // ===== å·®åˆ†æ”¾å¤§å™¨æ¨¡å¼ =====
+    // å·®åˆ†æ”¾å¤§å™¨é€šå¸¸åªæœ‰å¾®å°å¤±è°ƒï¼Œé›¶ç‚¹è¿‘ä¼¼0ã€‚ä½†ä¸ºäº†æ”¯æŒæ ¡å‡†ï¼Œä¾ç„¶ä½¿ç”¨ ZeroOffset
     int32_t s32ZeroOffset = pstcDev->stcCalibration.s32ZeroOffsetMv;
     
     if (pstcDev->stcCalibration.s32CalibrationValid != 0x5A5A5A5A) {
-        s32ZeroOffset = 0; // Î´Ğ£×¼Ê±£¬Ö±½ÓÈ¡0
+        s32ZeroOffset = 0; // æœªæ ¡å‡†æ—¶ï¼Œç›´æ¥å–0
     }
     
-    // ¼ÆËãµçÑ¹²î£ºÊµ²âµçÑ¹ - ÁãµãÆ«ÒÆ
-    // ×¢Òâ£º²î·Ö·Å´óÆ÷ 0A Ê±µçÑ¹½Ó½ü0£¬²»ĞèÒª¼õÈ¥ SENSOR_VOUT_ZERO_MA_INT (Í¨³£Îª0)
+    // è®¡ç®—ç”µå‹å·®ï¼šå®æµ‹ç”µå‹ - é›¶ç‚¹åç§»
+    // æ³¨æ„ï¼šå·®åˆ†æ”¾å¤§å™¨ 0A æ—¶ç”µå‹æ¥è¿‘0ï¼Œä¸éœ€è¦å‡å» SENSOR_VOUT_ZERO_MA_INT (é€šå¸¸ä¸º0)
     int32_t s32Diff = (int32_t)u16AdcVoltageMv - s32ZeroOffset;
 
-    // ×ª»»Îª mA: V_diff / Sensitivity (V/A) * 1000
-    // Sensitivity µ¥Î»ÊÇ mV/A£¬ËùÒÔÖ±½Ó s32Diff / s32Sensitivity * 1000 µ¥Î»ÊÇ mA
-    // µ«¸üºÃµÄ·½Ê½ÊÇ£º s32Diff(mV) / (Sensitivity_mV_per_A) = A
-    // È»ºó³ËÒÔ 1000 ×ªÎª mA
+    // è½¬æ¢ä¸º mA: V_diff / Sensitivity (V/A) * 1000
+    // Sensitivity å•ä½æ˜¯ mV/Aï¼Œæ‰€ä»¥ç›´æ¥ s32Diff / s32Sensitivity * 1000 å•ä½æ˜¯ mA
+    // ä½†æ›´å¥½çš„æ–¹å¼æ˜¯ï¼š s32Diff(mV) / (Sensitivity_mV_per_A) = A
+    // ç„¶åä¹˜ä»¥ 1000 è½¬ä¸º mA
     if (s32Sensitivity != 0) {
         s32CurrentMa = (int32_t)(((int64_t)s32Diff * 1000) / s32Sensitivity);
     }
     
 #else
-    // ===== »ô¶û´«¸ĞÆ÷Ô­Ê¼Âß¼­ =====
+    // ===== éœå°”ä¼ æ„Ÿå™¨åŸå§‹é€»è¾‘ =====
     int32_t s32ZeroOffset = pstcDev->stcCalibration.s32ZeroOffsetMv;
     if (pstcDev->stcCalibration.s32CalibrationValid != 0x5A5A5A5A) {
         s32ZeroOffset = 0;
@@ -159,14 +159,14 @@ static int32_t Sensor_CalcCurrentInternal(Sensor_Device_t* pstcDev, uint16_t u16
     
     int32_t s32Diff = (int32_t)u16AdcVoltageMv - s32ZeroTheory - s32ZeroOffset;
     
-    // ×ª»»Îª mA
+    // è½¬æ¢ä¸º mA
     if (s32Sensitivity != 0) {
         int64_t s64Temp = (int64_t)s32Diff * 1000;
         s32CurrentMa = (int32_t)(s64Temp / s32Sensitivity);
     }
 #endif
 
-    // ÁéÃô¶ÈÎ¢µ÷
+    // çµæ•åº¦å¾®è°ƒ
     if (pstcDev->stcCalibration.s16SensitivityScale != 0 && 
         pstcDev->stcCalibration.s16SensitivityScale != 100) {
         s32CurrentMa = (s32CurrentMa * pstcDev->stcCalibration.s16SensitivityScale) / 100;
@@ -175,12 +175,12 @@ static int32_t Sensor_CalcCurrentInternal(Sensor_Device_t* pstcDev, uint16_t u16
     return s32CurrentMa;
 }
 
-// ========== ´ÓADC¶ÁÈ¡Êı¾İ ==========
+// ========== ä»ADCè¯»å–æ•°æ® ==========
 static DeviceResult_t Sensor_ReadFromAdc(Sensor_Device_t* pstcDev) {
     if (!pstcDev) return RESULT_PARAM_ERR;
     
 #ifdef SENSOR_SIMULATION_MODE
-    // Ä£ÄâÄ£Ê½£ºÏÈ¸ù¾İ´«¸ĞÆ÷Ô­Ê¼µçÑ¹¼ÆËãADCÊäÈëµçÑ¹
+    // æ¨¡æ‹Ÿæ¨¡å¼ï¼šå…ˆæ ¹æ®ä¼ æ„Ÿå™¨åŸå§‹ç”µå‹è®¡ç®—ADCè¾“å…¥ç”µå‹
     uint16_t u16AdcVoltageMv = Sensor_Sim_GetAdcVoltageMv(s_u16SimSensorRawMv);
     pstcDev->u16AdcVoltageMv = u16AdcVoltageMv;
     pstcDev->u16AdcRawValue = SIM_ADC_RAW_VALUE(u16AdcVoltageMv);
@@ -206,7 +206,7 @@ static DeviceResult_t Sensor_ReadFromAdc(Sensor_Device_t* pstcDev) {
 #endif
 }
 
-// ========== ¼ÆËãµçÁ÷ ==========
+// ========== è®¡ç®—ç”µæµ ==========
 static void Sensor_CalcCurrent(Sensor_Device_t* pstcDev) {
     if (!pstcDev) return;
     
@@ -214,7 +214,7 @@ static void Sensor_CalcCurrent(Sensor_Device_t* pstcDev) {
     pstcDev->s16CurrentAx100 = (int16_t)(pstcDev->s32CurrentMa / 10);
 }
 
-// ========== ¹ıÁ÷¼ì²â - µãÊıÄ£Ê½ ==========
+// ========== è¿‡æµæ£€æµ‹ - ç‚¹æ•°æ¨¡å¼ ==========
 static void Sensor_CheckOvercurrent_SampleCount(Sensor_Device_t* pstcDev, 
                                                    uint8_t u8IsOvercurrent, 
                                                    uint8_t u8IsNormal,
@@ -266,7 +266,7 @@ static void Sensor_CheckOvercurrent_SampleCount(Sensor_Device_t* pstcDev,
     }
 }
 
-// ========== ¹ıÁ÷¼ì²â - Ê±¼äÄ£Ê½ ==========
+// ========== è¿‡æµæ£€æµ‹ - æ—¶é—´æ¨¡å¼ ==========
 static void Sensor_CheckOvercurrent_TimeWindow(Sensor_Device_t* pstcDev, 
                                                  uint8_t u8IsOvercurrent, 
                                                  uint8_t u8IsNormal,
@@ -341,7 +341,7 @@ static void Sensor_CheckOvercurrent_TimeWindow(Sensor_Device_t* pstcDev,
     }
 }
 
-// ========== ¹ıÁ÷¼ì²âÍ³Ò»Èë¿Ú ==========
+// ========== è¿‡æµæ£€æµ‹ç»Ÿä¸€å…¥å£ ==========
 static void Sensor_CheckOvercurrent(Sensor_Device_t* pstcDev) {
     if (!pstcDev) return;
     
@@ -372,7 +372,7 @@ static void Sensor_CheckOvercurrent(Sensor_Device_t* pstcDev) {
     }
 }
 
-// ========== ±ê×¼Éè±¸²Ù×÷ ==========
+// ========== æ ‡å‡†è®¾å¤‡æ“ä½œ ==========
 DeviceResult_t Sensor_Device_Init(void* handle) {
     Sensor_Device_t* pstcDev = (Sensor_Device_t*)handle;
     if (!pstcDev) return RESULT_PARAM_ERR;
@@ -435,13 +435,13 @@ DeviceResult_t Sensor_Device_Update(void* handle) {
         return res;
     }
     
-    // ========== Ê×´ÎÓĞĞ§Êı¾İĞ£×¼ ==========
+    // ========== é¦–æ¬¡æœ‰æ•ˆæ•°æ®æ ¡å‡† ==========
     if (!pstcDev->u8Calibrated) {
         uint16_t u16Voltage = pstcDev->u16AdcVoltageMv;
         uint32_t u32Now = tickTimer_GetCount();
         uint32_t u32Elapsed = u32Now - pstcDev->u32InitTime;
         
-        // Ê¹ÓÃĞÂ¶¨ÒåµÄĞ£×¼ãĞÖµ·¶Î§
+        // ä½¿ç”¨æ–°å®šä¹‰çš„æ ¡å‡†é˜ˆå€¼èŒƒå›´
         if (u16Voltage >= SENSOR_CALIB_VALID_MIN_MV && 
             u16Voltage <= SENSOR_CALIB_VALID_MAX_MV) {
             SENSOR_DEBUG("Detected zero current state: %d mV (elapsed=%lu ms), calibrating...\r\n",
@@ -450,7 +450,7 @@ DeviceResult_t Sensor_Device_Update(void* handle) {
             pstcDev->u8Calibrated = 1;
         } else if (u32Elapsed > 5000) {
             SENSOR_DEBUG("Calibration timeout! Using theoretical zero\r\n");
-            // Ê¹ÓÃÀíÂÛÁãµã
+            // ä½¿ç”¨ç†è®ºé›¶ç‚¹
 #if SENSOR_TYPE_DIFF_AMP_ENABLE
             pstcDev->stcCalibration.s32ZeroOffsetMv = 0;
 #else
@@ -562,7 +562,7 @@ DeviceResult_t Sensor_Device_Control(void* handle, DeviceCommandData_t* pstcCmd)
     }
 }
 
-// ========== µçÁ÷´«¸ĞÆ÷ÌØ¶¨½Ó¿Ú ==========
+// ========== ç”µæµä¼ æ„Ÿå™¨ç‰¹å®šæ¥å£ ==========
 int32_t Sensor_Device_GetCurrentMA(Sensor_Device_t* pstcDev) {
     if (!pstcDev || !pstcDev->u8Initialized) return 0;
     return pstcDev->s32CurrentMa;
@@ -586,7 +586,7 @@ Sensor_Device_t* Sensor_Device_Create(const Sensor_Config_t* pstcConfig) {
     return pstcDev;
 }
 
-// ========== Ğ£×¼½Ó¿ÚÊµÏÖ ==========
+// ========== æ ¡å‡†æ¥å£å®ç° ==========
 void Sensor_Device_CalibrateZero(Sensor_Device_t* pstcDev) {
     if (!pstcDev || !pstcDev->u8Initialized) return;
     
@@ -614,7 +614,7 @@ void Sensor_Device_GetCalibration(Sensor_Device_t* pstcDev, Sensor_Calibration_t
     *pstcCal = pstcDev->stcCalibration;
 }
 
-// ========== Ä£ÄâÄ£Ê½½Ó¿Ú ==========
+// ========== æ¨¡æ‹Ÿæ¨¡å¼æ¥å£ ==========
 #ifdef SENSOR_SIMULATION_MODE
 void Sensor_SetSimulationValue(uint16_t u16VoltageMv) {
     s_u16SimSensorRawMv = u16VoltageMv;
@@ -629,7 +629,7 @@ uint16_t Sensor_GetSimulationSensorRawMv(void) {
 }
 #endif
 
-// ========== ¹ıÁ÷¸æ¾¯ÊÖ¶¯Çå³ı½Ó¿Ú ==========
+// ========== è¿‡æµå‘Šè­¦æ‰‹åŠ¨æ¸…é™¤æ¥å£ ==========
 void Sensor_Device_ClearAlarm(Sensor_Device_t* pstcDev) {
     if (!pstcDev || !pstcDev->u8Initialized) return;
     if (!pstcDev->stcAlarmState.u8OvercurrentAlarm) return;
@@ -647,7 +647,7 @@ void Sensor_Device_ClearAlarm(Sensor_Device_t* pstcDev) {
     EventBus_Publish(TOPIC_CURRENT_ALARM, &stcEvent);
 }
 
-// ========== È«¾Ö²Ù×÷º¯Êı±í ==========
+// ========== å…¨å±€æ“ä½œå‡½æ•°è¡¨ ==========
 const DeviceOps_t g_sensor_ops = {
     .init = Sensor_Device_Init,
     .deinit = Sensor_Device_Deinit,

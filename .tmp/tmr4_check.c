@@ -4,7 +4,6 @@
 #include "hc32_ll_fcg.h"
 #include "hc32_ll_clk.h"
 #include "hc32_ll_utility.h"
-#include "rtt_log.h"
 #include <stdbool.h>
 
 static bool               s_bConfigured = false;
@@ -36,10 +35,6 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
     u32TimerClock = CLK_GetBusClockFreq(CLK_BUS_PCLK1);
     s_u16Period  = (uint16_t)(u32TimerClock / pConfig->freq_hz);
 
-    MAIN_D("[TMR4] mode=%s clk=%lu Hz period=%u ticks",
-           (pConfig->output_type == TMR4_OUTPUT_COMPLEMENTARY) ? "COMP" : "SYNC",
-           u32TimerClock, s_u16Period);
-
     /* Map active_high to TMR4 polarity macros */
     if (pConfig->active_high) {
         u16Polarity = TMR4_PWM_OXH_HOLD_OXL_HOLD;
@@ -58,17 +53,8 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
 
     /************************* Counter *************************/
     TMR4_StructInit(&stcTmr4Init);
-    stcTmr4Init.u16ClockDiv = TMR4_CLK_DIV1;
-
-    if (pConfig->output_type == TMR4_OUTPUT_SYNC) {
-        /* THROUGH mode requires triangle wave (per HC32 official example) */
-        stcTmr4Init.u16CountMode = TMR4_MD_TRIANGLE;
-        stcTmr4Init.u16PeriodValue = (uint16_t)(u32TimerClock / (pConfig->freq_hz * 2U)) - 1U;
-        s_u16Period = (uint16_t)(u32TimerClock / (pConfig->freq_hz * 2U));
-    } else {
-        stcTmr4Init.u16CountMode = TMR4_MD_SAWTOOTH;
-        stcTmr4Init.u16PeriodValue = s_u16Period - 1U;
-    }
+    stcTmr4Init.u16ClockDiv    = TMR4_CLK_DIV1;
+    stcTmr4Init.u16PeriodValue = s_u16Period - 1U;
     TMR4_Init(CM_TMR4_3, &stcTmr4Init);
 
     /************************* OC channels *************************/
@@ -103,20 +89,17 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
         TMR4_OC_Cmd(CM_TMR4_3, TMR4_OC_CH_UL, ENABLE);
 
     } else {
-        /* Through mode: per HC32 official example timer4_pwm_through */
-        stcTmr4OcInit.u16CompareValue = stcTmr4Init.u16PeriodValue / 2U;
-        stcTmr4OcInit.u16CompareValueBufCond = TMR4_OC_BUF_COND_PEAK;
-
+        /* Through mode: both UH and UL OC, identical timing */
         TMR4_OC_Init(CM_TMR4_3, TMR4_OC_CH_UH, &stcTmr4OcInit);
         TMR4_OC_Init(CM_TMR4_3, TMR4_OC_CH_UL, &stcTmr4OcInit);
 
-        /* UH compare mode: 0x225F - center-aligned PWM */
+        /* UH: edge-aligned PWM - HIGH at period, LOW at compare match */
         unOcmrh.OCMRx = 0U;
         unOcmrh.OCMRx_f.OCFDCH = TMR4_OC_OCF_SET;
         unOcmrh.OCMRx_f.OCFPKH = TMR4_OC_OCF_SET;
         unOcmrh.OCMRx_f.OCFUCH = TMR4_OC_OCF_SET;
         unOcmrh.OCMRx_f.OCFZRH = TMR4_OC_OCF_SET;
-        unOcmrh.OCMRx_f.OPDCH  = TMR4_OC_HIGH;
+        unOcmrh.OCMRx_f.OPDCH  = TMR4_OC_HOLD;
         unOcmrh.OCMRx_f.OPPKH  = TMR4_OC_HIGH;
         unOcmrh.OCMRx_f.OPUCH  = TMR4_OC_LOW;
         unOcmrh.OCMRx_f.OPZRH  = TMR4_OC_HOLD;
@@ -124,7 +107,7 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
         unOcmrh.OCMRx_f.OPNZRH = TMR4_OC_HOLD;
         TMR4_OC_SetHighChCompareMode(CM_TMR4_3, TMR4_OC_CH_UH, unOcmrh);
 
-        /* UL compare mode: 0x2250_225F - same as UH via EOP fields */
+        /* UL: same PWM, EOP fields set for dual-channel match events */
         unOcmrl.OCMRx = 0U;
         unOcmrl.OCMRx_f.OCFDCL  = TMR4_OC_OCF_SET;
         unOcmrl.OCMRx_f.OCFPKL  = TMR4_OC_OCF_SET;
@@ -174,11 +157,6 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
     }
 
     s_bConfigured = true;
-    MAIN_D("[TMR4] Config done: mode=%s count=%s period=%u polar=%s",
-           (pConfig->output_type == TMR4_OUTPUT_COMPLEMENTARY) ? "COMP" : "SYNC",
-           (stcTmr4Init.u16CountMode == TMR4_MD_TRIANGLE) ? "TRI" : "SAW",
-           s_u16Period,
-           pConfig->active_high ? "HIGH" : "LOW");
 }
 
 void TMR4_PWM_StartOutput(void)
