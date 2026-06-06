@@ -51,9 +51,45 @@ rs485.c/h              — Pure hardware: USART4 + PA03 direction pin + ISRs
 
 ## Key Architecture Patterns
 
-- **EventBus** (`Dev/EventBus.h`): Publish/subscribe for inter-module communication. 14 topics including `TOPIC_MANUAL_IO` (motor commands), `TOPIC_VOLTAGE_ALARM`, `TOPIC_CURRENT_ALARM`, `TOPIC_RTURN_LIMIT`. Uses deferred publish — events published before `EventBus_Enable()` are queued as a bitmask and replayed on enable. Max 4 subscribers per topic, priority-ordered (0 = highest).
+- **EventBus** (`Dev/EventBus.h`): Publish/subscribe for inter-module communication. Uses deferred publish — events published before `EventBus_Enable()` are queued as a bitmask and replayed on enable. Max 4 subscribers per topic, priority-ordered (0 = highest).
 
-- **DeviceManager** (`Dev/device_manager.h`): Uniform device registry with time-sliced update scheduling. Each device gets an `update()` callback called at its configured interval (typically 1ms, voltage bus at 10ms). Mutex-protected access. 16 devices registered (motor arbitrator, power outputs, Hall switches, IO buttons, PWM, ADC channels, sensors).
+  | Index | Topic | Purpose |
+  |-------|-------|---------|
+  | 0 | `TOPIC_POWER` | Power output state changes |
+  | 1 | `TOPIC_LIMIT_HARD` | Hardware limit switches |
+  | 2 | `TOPIC_LIMIT_SOFT` | Software limits |
+  | 3 | `TOPIC_CAN_EVENT` | CAN bus events (reserved) |
+  | 4 | `TOPIC_MOTOR_CMD` | Motor control commands |
+  | 5 | `TOPIC_MOTOR_SPEED_FEEDBACK` | Speed feedback from Hall sensor |
+  | 6 | `TOPIC_MOTOR_DRIVE_EXEC` | Drive execution |
+  | 7 | `TOPIC_MANUAL_IO` | Manual IO button presses |
+  | 8 | `TOPIC_ALARM` | Generic alarm events |
+  | 9 | `TOPIC_VOLTAGE_ALARM` | Voltage fault alarm (over/under) |
+  | 10 | `TOPIC_CURRENT_ALARM` | Overcurrent alarm |
+  | 11 | `TOPIC_RTURN_LIMIT` | Rotation angle limit reached |
+  | 12 | `TOPIC_FAULT_CLEAR` | Fault clear request |
+  | 13 | `TOPIC_MANUAL_RS485` | Manual RS485 control |
+
+- **DeviceManager** (`Dev/device_manager.h`): Uniform device registry with time-sliced update scheduling. Each device gets an `update()` callback called at its configured interval (typically 1ms, voltage bus at 10ms). Mutex-protected access. Device IDs are defined in `App/App_Motor_Project.h`:
+
+  | ID | Constant | Device |
+  |----|----------|--------|
+  | 0 | `ID_MOTOR` | Motor arbitrator |
+  | 1 | `ID_PWR_POS` | Positive power output |
+  | 2 | `ID_PWR_NEG` | Negative power output |
+  | 3 | `ID_PWR_TEST1` | Test power 1 (PB10) |
+  | 4 | `ID_PWR_TEST2` | Test power 2 (PA02) |
+  | 5 | `ID_HALL_UP` | Upper Hall limit switch |
+  | 6 | `ID_HALL_DOWN` | Lower Hall limit switch |
+  | 7 | `ID_IO_FWD` | Forward IO button |
+  | 8 | `ID_IO_REV` | Reverse IO button |
+  | 9 | `ID_PWM_MOTOR` | Motor PWM output |
+  | 10 | `ID_MOTOR_HALL` | Hall sensor (speed/dir) |
+  | 11 | `ID_ADC_CURRENT` | Current ADC channel |
+  | 12 | `ID_ADC_VOLTAGE` | Voltage ADC channel |
+  | 13 | `ID_VOLTAGE_BUS` | Voltage bus monitor |
+  | 14 | `ID_SENSOR_CURRENT` | Current sensor (threshold) |
+  | 15 | `ID_RTURN` | Rotation angle limiter |
 
 - **Param Manager** (`Utils/param_manager.h`): Register-based parameter storage with Flash persistence. Parameters live in `g_AppParam` (type `AppParamRecord_t`). Read/write via `Param_ReadByReg()`/`Param_WriteByReg()`, save via `Param_Save()`. Uses wear-leveled Flash storage across sectors 56-62 with CRC32 validation, sequence numbers, and magic headers.
 
@@ -99,6 +135,27 @@ Bits written via Modbus function 0x06 (single write only):
 
 Typical sequence: START (0x0001) → FWD (0x0011) → STOP (0x0002)
 
+## Startup Initialization Sequence
+
+The startup flow in `main.c`:
+
+```
+Hardware_Init()           → SysTick, TMR0 timers, AOS trigger chains, GPIO
+App_Comm_Init(&comm_cfg)  → 4-layer comm stack (RS485 + Modbus RTU)
+ESystem_Init()            → DeviceManager + EventBus + all 16 devices registered
+FaultHandler_Init()       → Subscribe to TOPIC_VOLTAGE_ALARM + TOPIC_CURRENT_ALARM
+TMR4_PWM_Config(&pwm_cfg) → TMR4 PWM at 50kHz, SYNC output, active-high
+EventBus_Enable()         → Unblock deferred publishes, replay queued events
+// Super loop:
+while (1) {
+    ESystem_MainLoop();   // DeviceManager update scheduling
+    App_Comm_Poll();      // Modbus frame processing
+    TMR4_PWM_SetDuty();   // PWM duty update
+}
+```
+
+`ESystem_Init()` is defined in `App/App_Motor_Project.c` and wires up all device instances, EventBus subscriptions, and callbacks.
+
 ## Important Constraints
 
 - Flash erase/write cycles are limited (~10K-100K). Each `Param_Save()` triggers a sector erase. Avoid calling it per-register in multi-register writes (0x10) — the batch write path calls `Param_Save()` once for the entire batch
@@ -110,9 +167,13 @@ Typical sequence: START (0x0001) → FWD (0x0011) → STOP (0x0002)
 
 ## Motor Control Architecture
 
-### PWM Output (TMRA_4)
+### PWM Output
 
-The motor uses **TMRA_4** edge-aligned PWM with 4 channels on PB6-PB9 (CH3/CH4 partially commented out in the stop path):
+The motor has **two** PWM timer configurations:
+
+**TMR4 PWM (active in current `main.c`):** 50kHz center-aligned PWM on PB8/PB9 via `Adp/tmr4_pwm.c/h`. Configured with `TMR4_OUTPUT_SYNC` mode for external gate-driver IC with built-in dead-time. Set via `TMR4_PWM_SetDuty(2500)` for 25% duty in the super loop.
+
+**TMRA_4 PWM (commented out in `main.c`, preserved as reference):** Edge-aligned PWM with 4 channels on PB6-PB9 (CH3/CH4 partially commented out in the stop path):
 
 | Channel | Pin | Active Polarity |
 |---------|-----|-----------------|
@@ -191,9 +252,10 @@ Correct interrupt names (no underscore between INT and number):
 | `Adp/tmr4_pwm.c/h` | TMR4 complementary PWM (standalone driver) |
 | `Adp/Motor_hall.c/h` | Hall sensor driver: GPIO interrupts, RPM/direction calculation |
 | `Adp/Timer0_Unit1.c/h` | Timer0 unit 1 — timebase and timing |
-| `Adp/timer6_timebase.c/h` | TMR6 timebase — system tick generation |
+| `Adp/timer6_timebase.c/h` | TMR6 timebase — free-running μs counter for `tickTimer_GetCount()` |
 | `Dev/dev_motor.c/h` | Motor arbitrator: block/allow lists, direction arbitration, ramp callbacks |
 | `Dev/dev_motor_hall.c/h` | Device-layer wrapper for Hall sensor |
+| `Dev/dev_rturn.c/h` | Rotation angle limiter: angle integration, calibration, lock/release |
 | `App/App_Motor_Project.c/h` | Hardware pin definitions, device registration, simulation data |
 | `Utils/Params.h` | Modbus register map definitions (REG_*) + Flash record layout (`AppParamRecord_t`) |
 | `Utils/rtt_manager.h` | Per-module debug macro switches (enable via uncommenting `#define` lines) |
@@ -210,6 +272,22 @@ Each module has a commented-out `#define MODULE_NAME` line. Uncomment to enable 
 ```
 
 Also provides `INTERVAL_DECLARE()` macro for rate-limited debug printing to avoid flooding the RTT channel at high frequencies.
+
+### Rotation Angle Limiting (`Dev/dev_rturn.c/h`)
+
+Tracks motor rotation angle by integrating Hall sensor RPM over time. Blocks motor direction when limits are reached, publishes `TOPIC_RTURN_LIMIT`.
+
+**Key parameters** (defined in `App_Motor_Project.h`):
+- Reduction ratio: 1183:1 (`RTURN_REDUCTION_RATIO`)
+- Max angle: 88.0° (`RTURN_MAX_ANGLE`)
+- Min angle: -2.0° (`RTURN_MIN_ANGLE`)
+- Update interval: 1ms
+
+**Calibration:** Device starts uncalibrated. On first overcurrent event in the reverse direction, angle snaps to `fMinAngle` (-2.0°) and calibration flag is set. Forward overcurrent before calibration only locks direction — no angle adjustment.
+
+**Lock/release:** Overcurrent alarm (`TOPIC_CURRENT_ALARM`) triggers a directional lock. Lock releases when desired motor direction reverses (e.g., locked forward → command reverse = release). After release, if overcurrent persists in the new direction, it re-locks. Also has software position limit: angle ≥ `fMaxAngle` triggers a forward lock.
+
+**Debug globals** (watchable in Keil): `g_fDbgRTurnAngle`, `g_fDbgRTurnSpeed`, `g_u8DbgRTurnDir`, `g_u8DbgRTurnDesiredDir`, `g_u8DbgRTurnLockedDir`, `g_u8DbgRTurnLockActive`, `g_u8DbgRTurnCalibrated`, `g_u8DbgRTurnLimitTrig`
 
 ### GBK File Encoding & Safe Edit Workflow (MANDATORY for .c/.h files)
 
