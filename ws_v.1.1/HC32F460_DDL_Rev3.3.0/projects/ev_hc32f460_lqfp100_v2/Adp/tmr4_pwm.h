@@ -27,11 +27,13 @@ typedef enum {
     TMR4_CHANNEL_W = 2,
 } tmr4_pwm_channel_t;
 
-/* Configuration structure for TMR4 PWM (shared by all 3 channels) */
+/* Configuration structure for TMR4 PWM (per-channel output type) */
 typedef struct {
-    tmr4_output_type_t output_type;    /* Complementary or sync */
-    uint16_t           freq_hz;        /* PWM frequency in Hz (period auto-calculated from PCLK1) */
-    uint16_t           dead_time_ns;   /* Dead-time in nanoseconds (only effective in COMPLEMENTARY mode) */
+    tmr4_output_type_t output_type_u;  /* U channel: Complementary or sync */
+    tmr4_output_type_t output_type_v;  /* V channel: Complementary or sync */
+    tmr4_output_type_t output_type_w;  /* W channel: Complementary or sync */
+    uint16_t           freq_hz;        /* PWM frequency in Hz */
+    uint16_t           dead_time_ns;   /* Dead-time in ns (only used by COMPLEMENTARY channels) */
     bool               active_high;    /* true = active high, false = active low */
 } tmr4_pwm_config_t;
 

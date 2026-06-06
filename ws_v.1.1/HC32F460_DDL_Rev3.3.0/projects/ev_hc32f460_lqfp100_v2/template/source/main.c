@@ -19,7 +19,7 @@
 #include "dev_commutation.h"
 
 //   /*=============================================================================
-//    * ȫ��PWMʵ�������������ʹ�ã�???
+//    * ȫ��PWMʵ�������������ʹ�ã�????
 //    *=============================================================================*/
   pwm_t g_motor_pwm_ch1;  // PB6
   pwm_t g_motor_pwm_ch2;  // PB7
@@ -66,7 +66,7 @@
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // ����GPIO���裨������ú�������???
+//       // ����GPIO���裨������ú�������????
 //       LL_PERIPH_WP(LL_PERIPH_GPIO);
 
 //       // ����FCG���裨ʹ�ܶ�ʱ��ʱ�ӣ�
@@ -78,7 +78,7 @@
 //       PWM_Start(&g_motor_pwm_ch3);
 //       PWM_Start(&g_motor_pwm_ch4);
 
-//       // ʹ�����???
+//       // ʹ�����????
 //       PWM_OutputCmd(&g_motor_pwm_ch1, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch2, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch3, PWM_OUTPUT_ENABLE);
@@ -120,10 +120,12 @@
     //   Motor_Pwm_Init();
 	  tickTimer_DelayMs(5);
       static const tmr4_pwm_config_t pwm_cfg = {
-          .output_type  = TMR4_OUTPUT_SYNC,
-          .freq_hz      = 50000,
-          .dead_time_ns = 1000,
-          .active_high  = true,
+          .output_type_u = TMR4_OUTPUT_SYNC,
+          .output_type_v = TMR4_OUTPUT_SYNC,
+          .output_type_w = TMR4_OUTPUT_COMPLEMENTARY,
+          .freq_hz       = 50000,
+          .dead_time_ns  = 0,
+          .active_high   = true,
       };
       TMR4_PWM_Config(&pwm_cfg);
 
@@ -141,7 +143,7 @@
        *=========================================================================*/
       // volatile uint8_t motor_mode = 0;
 
-      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��???
+      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��????
       EventBus_Enable();
 	
       while (1)
