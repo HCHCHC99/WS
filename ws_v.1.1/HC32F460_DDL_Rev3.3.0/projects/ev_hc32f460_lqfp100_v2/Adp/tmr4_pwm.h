@@ -49,8 +49,14 @@ void TMR4_PWM_StopOutput(void);
 /* Immediate all-off (emergency stop) */
 void TMR4_PWM_EmergencyStop(void);
 
-/* Set duty cycle for a specific channel: 0 = 0.00%, 10000 = 100.00% */
+/* Set PWM frequency (Hz) — updates counter period. All duties must be re-applied after. */
+void TMR4_PWM_SetFrequency(uint16_t freq_hz);
+
+/* Set duty cycle for a specific channel: 0 = 0.00%, 10000 = 100.00% (legacy) */
 void TMR4_PWM_SetDuty(tmr4_pwm_channel_t channel, uint16_t u16Duty);
+
+/* Set duty cycle as float percentage: 0.0f = 0%, 100.0f = 100% */
+void TMR4_PWM_SetDutyFloat(tmr4_pwm_channel_t channel, float duty_pct);
 
 /* Enable or disable a specific PWM channel pair (both H and L sides) */
 void TMR4_PWM_ChannelCmd(tmr4_pwm_channel_t channel, bool enable);
@@ -67,8 +73,14 @@ void TMR4_PWM_PinSetDuty(tmr4_pwm_channel_t channel, bool high_side, uint16_t u1
  * Use for OFF phase: set H=HIGH, L=LOW → disable both → H,L → interlock. */
 void TMR4_PWM_PinSetInvalidLevel(tmr4_pwm_channel_t channel, bool high_side, bool level_high);
 
-/* Switch a channel to complementary PWM mode with specified dead-time (ns).
- * Re-initializes the PWM channel. Use 0 for no dead-time. */
-void TMR4_PWM_SetChannelComplementary(tmr4_pwm_channel_t channel, uint16_t dead_time_ns);
+/* Channel output mode */
+typedef enum {
+    TMR4_MODE_SYNC           = 0,  /* H & L same duty */
+    TMR4_MODE_COMPLEMENTARY  = 1,  /* H & L complementary (dead-time from Config) */
+} tmr4_channel_mode_t;
+
+/* Switch a channel's output mode at runtime (for six-step commutation).
+ * Re-initializes OC + PWM for the channel. duty_pct = 0.0f~100.0f. */
+void TMR4_PWM_SetChannelMode(tmr4_pwm_channel_t channel, tmr4_channel_mode_t mode, float duty_pct);
 
 #endif /* __TMR4_PWM_H__ */

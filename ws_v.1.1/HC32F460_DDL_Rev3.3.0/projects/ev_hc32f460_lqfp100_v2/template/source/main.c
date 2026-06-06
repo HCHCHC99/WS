@@ -19,7 +19,7 @@
 #include "dev_commutation.h"
 
 //   /*=============================================================================
-//    * ȫ��PWMʵ�������������ʹ�ã�????
+//    * ȫ��PWMʵ�������������ʹ�ã�?????
 //    *=============================================================================*/
   pwm_t g_motor_pwm_ch1;  // PB6
   pwm_t g_motor_pwm_ch2;  // PB7
@@ -66,7 +66,7 @@
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // ����GPIO���裨������ú�������????
+//       // ����GPIO���裨������ú�������?????
 //       LL_PERIPH_WP(LL_PERIPH_GPIO);
 
 //       // ����FCG���裨ʹ�ܶ�ʱ��ʱ�ӣ�
@@ -78,7 +78,7 @@
 //       PWM_Start(&g_motor_pwm_ch3);
 //       PWM_Start(&g_motor_pwm_ch4);
 
-//       // ʹ�����????
+//       // ʹ�����?????
 //       PWM_OutputCmd(&g_motor_pwm_ch1, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch2, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch3, PWM_OUTPUT_ENABLE);
@@ -93,6 +93,7 @@
   /*=============================================================================
    * ������
    *=============================================================================*/
+  volatile int commu_num = 0;
   int main(void)
   {
       Hardware_Init();
@@ -122,7 +123,7 @@
       static const tmr4_pwm_config_t pwm_cfg = {
           .output_type_u = TMR4_OUTPUT_SYNC,
           .output_type_v = TMR4_OUTPUT_SYNC,
-          .output_type_w = TMR4_OUTPUT_COMPLEMENTARY,
+          .output_type_w = TMR4_OUTPUT_SYNC,
           .freq_hz       = 50000,
           .dead_time_ns  = 0,
           .active_high   = true,
@@ -132,10 +133,9 @@
       MAIN_D("[MAIN] TMR4 Config done, starting output");
       TMR4_PWM_StartOutput();
 
-      /* TEST: U=95%, V=5%, W=50%, all SYNC mode */
-      TMR4_PWM_SetDuty(TMR4_CHANNEL_U, 9500);
-      TMR4_PWM_SetDuty(TMR4_CHANNEL_V, 500);
-      TMR4_PWM_SetDuty(TMR4_CHANNEL_W, 5000);
+      /* 六步换相: 初始化全部互补OFF, 切到 UH_VL (50kHz, U=95.0% PWM, V=2% ON, W=互补OFF) */
+      Commutation_Init();
+      COMM_STEP_UH_VL(50000, 95.0f);
 
       /*=========================================================================
        * �������ģʽ����������Keil Watch�������޸ģ�
@@ -143,13 +143,39 @@
        *=========================================================================*/
       // volatile uint8_t motor_mode = 0;
 
-      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��????
+      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��?????
       EventBus_Enable();
 	
       while (1)
       {
           ESystem_MainLoop();
           App_Comm_Poll();
+
+
+		  if(commu_num == 0)
+		  {
+			COMM_STEP_UH_VL(50000, 95.0f);
+		  }
+		  else if(commu_num == 1)
+		  {
+			COMM_STEP_UH_WL(50000, 95.0f);
+		  }
+		  else if(commu_num == 2)
+		  {
+			COMM_STEP_VH_WL(50000, 95.0f);
+		  }
+		  else if(commu_num == 3)
+		  {
+			COMM_STEP_VH_UL(50000, 95.0f);
+		  }
+		  else if(commu_num == 4)
+		  {
+			COMM_STEP_WH_UL(50000, 95.0f);
+		  }
+		  else if(commu_num == 5)
+		  {
+			COMM_STEP_WH_VL(50000, 95.0f);
+		  }
         //   TMR4_PWM_SetDuty(TMR4_CHANNEL_U, 2500);
 
         //   PWM_Update(&g_motor_pwm_ch1);

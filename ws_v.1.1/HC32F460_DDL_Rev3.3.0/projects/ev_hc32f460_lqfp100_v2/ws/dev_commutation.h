@@ -4,42 +4,41 @@
 #include "tmr4_pwm.h"
 
 /*=============================================================================
- * SDH21263 pre-driver truth table (per phase):
- *   HIN=H, LIN=H  -> high-side ON
- *   HIN=L, LIN=L  -> low-side ON
- *   HIN!=LIN      -> interlock (both OFF, built-in dead-time)
+ * Six-step commutation states
  *
- * Six-step commutation states:
- *   State   High-side(PWM)  Low-side(ON)   Current
- *   -----   --------------  ------------   -------
- *   UH_VL   U (HIN=PWM)     V (LIN=L)      U -> V
- *   UH_WL   U (HIN=PWM)     W (LIN=L)      U -> W
- *   VH_WL   V (HIN=PWM)     W (LIN=L)      V -> W
- *   VH_UL   V (HIN=PWM)     U (LIN=L)      V -> U
- *   WH_UL   W (HIN=PWM)     U (LIN=L)      W -> U
- *   WH_VL   W (HIN=PWM)     V (LIN=L)      W -> V
+ *   Macro             High-side(PWM)  Low-side(ON)  OFF
+ *   -----             --------------  ------------  ---
+ *   COMM_STEP_UH_VL   U (SYNC, duty)  V (SYNC, 2%)  W (COMP, 50%)
+ *   COMM_STEP_UH_WL   U (SYNC, duty)  W (SYNC, 2%)  V (COMP, 50%)
+ *   COMM_STEP_VH_WL   V (SYNC, duty)  W (SYNC, 2%)  U (COMP, 50%)
+ *   COMM_STEP_VH_UL   V (SYNC, duty)  U (SYNC, 2%)  W (COMP, 50%)
+ *   COMM_STEP_WH_UL   W (SYNC, duty)  U (SYNC, 2%)  V (COMP, 50%)
+ *   COMM_STEP_WH_VL   W (SYNC, duty)  V (SYNC, 2%)  U (COMP, 50%)
+ *
+ * SDH21263 pre-driver truth table (per phase):
+ *   H,H -> high-side ON   L,L -> low-side ON   H!=L -> interlock OFF
  *=============================================================================*/
 
 /* Pre-driver duty limits */
-#define COMM_DUTY_MIN  200U   /* 2% */
-#define COMM_DUTY_MAX  9800U  /* 98% */
+#define COMM_DUTY_MIN_F  2.0f    /* 2% */
+#define COMM_DUTY_MAX_F  98.0f   /* 98% */
+#define COMM_DUTY_OFF_F  50.0f   /* 50% (complementary OFF) */
 
-typedef enum {
-    COMM_STATE_UH_VL = 0,
-    COMM_STATE_UH_WL = 1,
-    COMM_STATE_VH_WL = 2,
-    COMM_STATE_VH_UL = 3,
-    COMM_STATE_WH_UL = 4,
-    COMM_STATE_WH_VL = 5,
-} comm_state_t;
+/* Commutation step macros — freq_hz (e.g. 50000), duty_pct (e.g. 95.0f) */
+#define COMM_STEP_UH_VL(f, d)  Commutation_Step(0, (f), (d))
+#define COMM_STEP_UH_WL(f, d)  Commutation_Step(1, (f), (d))
+#define COMM_STEP_VH_WL(f, d)  Commutation_Step(2, (f), (d))
+#define COMM_STEP_VH_UL(f, d)  Commutation_Step(3, (f), (d))
+#define COMM_STEP_WH_UL(f, d)  Commutation_Step(4, (f), (d))
+#define COMM_STEP_WH_VL(f, d)  Commutation_Step(5, (f), (d))
 
-/* Enable all 6 output pins, set to safe OFF state (interlock on all phases) */
+/* Initialize all 3 phases to complementary OFF */
 void Commutation_Init(void);
 
-/* Switch to the specified commutation state with PWM duty (clamped to 2%-98%) */
-void Commutation_Step(comm_state_t state, uint16_t duty);
+/* Execute one commutation step (0-5), freq_hz, duty_pct clamped to 2%~98% */
+void Commutation_Step(uint8_t state, uint16_t freq_hz, float duty_pct);
 
-/* Return all phases to interlock OFF state */
+/* All phases to complementary OFF */
 void Commutation_Stop(void);
 
 #endif /* __DEV_COMMUTATION_H__ */
