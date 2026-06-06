@@ -8,6 +8,15 @@
 #include <stdbool.h>
 
 /*=============================================================================
+ * Shadow register control (1=ON, 0=OFF)
+ *   ON:  writes go to shadow → transferred at counter PEAK → 3-ch sync, no glitch
+ *   OFF: writes take effect immediately (IMMED)
+ *=============================================================================*/
+#define TMR4_SHADOW_CPSR_ENABLE   1U   /* Counter period    (0=immed, 1=PEAK) */
+#define TMR4_SHADOW_OCCR_ENABLE   1U   /* Compare value     (0=immed, 1=PEAK) */
+#define TMR4_SHADOW_OCMR_ENABLE   1U   /* Compare mode      (0=immed, 1=PEAK) */
+
+/*=============================================================================
  * Half-bridge pair descriptor (ROM table, channel enum used as index)
  *=============================================================================*/
 typedef struct {
@@ -40,6 +49,22 @@ static tmr4_output_type_t s_channel_type[3] = {
     TMR4_OUTPUT_COMPLEMENTARY,
     TMR4_OUTPUT_COMPLEMENTARY,
 };
+/*=============================================================================
+ * Apply shadow register settings to one OC channel
+ *=============================================================================*/
+static void Shadow_ApplyOC(uint32_t oc_ch)
+{
+    uint16_t cond = TMR4_OC_BUF_COND_PEAK;
+    uint16_t immed = TMR4_OC_BUF_COND_IMMED;
+
+    TMR4_OC_SetCompareBufCond(CM_TMR4_3, oc_ch,
+        TMR4_OC_BUF_CMP_VALUE,
+        TMR4_SHADOW_OCCR_ENABLE ? cond : immed);
+    TMR4_OC_SetCompareBufCond(CM_TMR4_3, oc_ch,
+        TMR4_OC_BUF_CMP_MD,
+        TMR4_SHADOW_OCMR_ENABLE ? cond : immed);
+}
+
 /*=============================================================================
  * Dead-time conversion (nanoseconds -> timer ticks)
  *=============================================================================*/
@@ -188,6 +213,7 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
     stcTmr4Init.u16CountMode   = TMR4_MD_TRIANGLE;
     stcTmr4Init.u16PeriodValue = s_u16Period - 1U;
     TMR4_Init(CM_TMR4_3, &stcTmr4Init);
+    TMR4_PeriodBufCmd(CM_TMR4_3, TMR4_SHADOW_CPSR_ENABLE ? ENABLE : DISABLE);
 
     /* --- OC channels & PWM channels (loop U/V/W) --- */
     TMR4_OC_StructInit(&stcTmr4OcInit);
@@ -201,6 +227,7 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
             TMR4_OC_Init(CM_TMR4_3, pair->oc_ch_l, &stcTmr4OcInit);
             OCMode_CompLow(CM_TMR4_3, pair->oc_ch_l);
             TMR4_OC_Cmd(CM_TMR4_3, pair->oc_ch_l, ENABLE);
+            Shadow_ApplyOC(pair->oc_ch_l);
         } else {
             /* SYNC: both high and low sides, initial compare = 50% */
             stcTmr4OcInit.u16CompareValue = stcTmr4Init.u16PeriodValue / 2U;
@@ -214,6 +241,9 @@ void TMR4_PWM_Config(const tmr4_pwm_config_t *pConfig)
 
             TMR4_OC_Cmd(CM_TMR4_3, pair->oc_ch_h, ENABLE);
             TMR4_OC_Cmd(CM_TMR4_3, pair->oc_ch_l, ENABLE);
+
+            Shadow_ApplyOC(pair->oc_ch_h);
+            Shadow_ApplyOC(pair->oc_ch_l);
         }
 
         /***** PWM init *****/
@@ -483,6 +513,7 @@ void TMR4_PWM_SetChannelMode(tmr4_pwm_channel_t channel, tmr4_channel_mode_t mod
         TMR4_OC_Cmd(CM_TMR4_3, pair->oc_ch_h, DISABLE);
         TMR4_OC_Cmd(CM_TMR4_3, pair->oc_ch_l, ENABLE);
         TMR4_OC_SetCompareValue(CM_TMR4_3, pair->oc_ch_l, u16Compare);
+        Shadow_ApplyOC(pair->oc_ch_l);
 
     } else {
         /* --- Switch to SYNC --- */
@@ -507,6 +538,8 @@ void TMR4_PWM_SetChannelMode(tmr4_pwm_channel_t channel, tmr4_channel_mode_t mod
 
         TMR4_OC_SetCompareValue(CM_TMR4_3, pair->oc_ch_h, u16Compare);
         TMR4_OC_SetCompareValue(CM_TMR4_3, pair->oc_ch_l, u16Compare);
+        Shadow_ApplyOC(pair->oc_ch_h);
+        Shadow_ApplyOC(pair->oc_ch_l);
     }
 }
 
