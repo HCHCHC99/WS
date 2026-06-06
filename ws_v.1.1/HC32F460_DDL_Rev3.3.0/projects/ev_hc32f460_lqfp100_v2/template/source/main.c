@@ -16,9 +16,10 @@
   #include "Pwm.h"
   #include "hc32_ll_utility.h"
   #include "tmr4_pwm.h"
+#include "dev_commutation.h"
 
 //   /*=============================================================================
-//    * ȫ��PWMʵ�������������ʹ�ã�?
+//    * ȫ��PWMʵ�������������ʹ�ã�???
 //    *=============================================================================*/
   pwm_t g_motor_pwm_ch1;  // PB6
   pwm_t g_motor_pwm_ch2;  // PB7
@@ -35,7 +36,7 @@
 //    *=============================================================================*/
 //   static void Motor_Pwm_Init(void)
 //   {
-//       // ����������?4��ͨ��ȫ������Ч������תͨ��ռ�ձȷ���ʵ�֣�
+//       // ����������?4��ͨ��ȫ������Ч������תͨ��ռ�ձȷ���ʵ�֣�
 //       // Ƶ�ʣ�20kHz����ʼռ�ձȣ�0%
 
 //       // ����GPIO���裨�����޸�GPIO�������ã�
@@ -65,7 +66,7 @@
 //                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
 //                                   6000, 0, PWM_ACTIVE_LOW);
 
-//       // ����GPIO���裨������ú�������?
+//       // ����GPIO���裨������ú�������???
 //       LL_PERIPH_WP(LL_PERIPH_GPIO);
 
 //       // ����FCG���裨ʹ�ܶ�ʱ��ʱ�ӣ�
@@ -77,7 +78,7 @@
 //       PWM_Start(&g_motor_pwm_ch3);
 //       PWM_Start(&g_motor_pwm_ch4);
 
-//       // ʹ�����?
+//       // ʹ�����???
 //       PWM_OutputCmd(&g_motor_pwm_ch1, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch2, PWM_OUTPUT_ENABLE);
 //       PWM_OutputCmd(&g_motor_pwm_ch3, PWM_OUTPUT_ENABLE);
@@ -115,7 +116,7 @@
       /* ��ʼ�����ϴ����������ĵ�ѹ/�����¼������¹����룩 */
       FaultHandler_Init();
 
-      /* ��ʼ�����PWM���ڵ���豸��ʼ���ǰ��? */
+      /* ��ʼ�����PWM���ڵ���豸��ʼ���ǰ��? */
     //   Motor_Pwm_Init();
 	  tickTimer_DelayMs(5);
       static const tmr4_pwm_config_t pwm_cfg = {
@@ -129,20 +130,25 @@
       MAIN_D("[MAIN] TMR4 Config done, starting output");
       TMR4_PWM_StartOutput();
 
+      /* TEST: U=95%, V=5%, W=50%, all SYNC mode */
+      TMR4_PWM_SetDuty(TMR4_CHANNEL_U, 9500);
+      TMR4_PWM_SetDuty(TMR4_CHANNEL_V, 500);
+      TMR4_PWM_SetDuty(TMR4_CHANNEL_W, 5000);
+
       /*=========================================================================
        * �������ģʽ����������Keil Watch�������޸ģ�
        * 0: ֹͣ, 1: ��ת, 2: ��ת
        *=========================================================================*/
       // volatile uint8_t motor_mode = 0;
 
-      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��?
+      // MotorDevice_t* motor = NULL;       // TODO: ��ȡ����豸ָ��???
       EventBus_Enable();
 	
       while (1)
       {
           ESystem_MainLoop();
           App_Comm_Poll();
-          TMR4_PWM_SetDuty(2500);
+        //   TMR4_PWM_SetDuty(TMR4_CHANNEL_U, 2500);
 
         //   PWM_Update(&g_motor_pwm_ch1);
         //   PWM_Update(&g_motor_pwm_ch2);
@@ -156,7 +162,7 @@
           // } else if (motor_mode == 2) {
           //     Motor_OnArbitrationRev(motor, 0.0f);
           // }
-          tickTimer_DelayMs(500);
+          
       }
   }
   

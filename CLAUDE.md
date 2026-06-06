@@ -160,6 +160,7 @@ while (1) {
 
 - Flash erase/write cycles are limited (~10K-100K). Each `Param_Save()` triggers a sector erase. Avoid calling it per-register in multi-register writes (0x10) — the batch write path calls `Param_Save()` once for the entire batch
 - Interrupt safety: Comm_HAL uses `__disable_irq()`/`__enable_irq()` around ring buffer reads. Keep critical sections short
+- `ModbusRTU_SendResponse` writes CRC at `raw[len]` and `raw[len+1]` — if `len >= 255`, this overruns the 256-byte buffer. Current code paths keep `len ≤ 253` (3-byte header + max 250 data bytes), but add a bounds check when modifying protocol logic
 - `ModbusRTU_ProcessFrame` expects `len <= 256`. Frame buffer is 256 bytes. Modbus RTU max frame is 256 bytes so this is safe
 - RS485 direction pin polarity is configurable via `dir_polarity` (0 = high-TX/low-RX, 1 = low-TX/high-RX)
 - Realtime data (`g_RealTimeData`) is RAM-only, **not persisted to Flash** — lost on power cycle
@@ -329,3 +330,9 @@ See `Utils/Params.h` for the full list of `REG_*` constants and `AppParamRecord_
 - `ws_v.1.1/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
 - `ws_v.1.1/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
 - `ws_v.1.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames for testing (`python modbus_test_cmds.py` to see examples)
+- `安全审查报告.md` — Security audit of the RS485/Modbus comm stack. Key findings:
+  - **Critical:** Potential buffer overrun in `ModbusRTU_SendResponse` if `len >= 255` (CRC write at `raw[len]`/`raw[len+1]`). Current code paths keep `len ≤ 253` but lacks defensive bounds check.
+  - **High:** `HAL_FrameParser` silently truncates frames > 256 bytes (acceptable for Modbus RTU max frame size).
+  - **Medium:** Every register write triggers `Param_Save()` (Flash erase). Multi-register writes (0x10) batch-save correctly, but repeated single writes cause excessive Flash wear.
+  - **Low:** `Comm_HAL_Init` returns silently on NULL config — no `m_bInitialized` flag means `Comm_HAL_Poll` operates on uninitialized data structures.
+  - No catastrophic bugs found. All findings are defensive-hardening recommendations.

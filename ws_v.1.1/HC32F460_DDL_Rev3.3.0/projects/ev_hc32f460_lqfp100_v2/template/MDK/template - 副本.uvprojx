@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>__DEBUG,HC32F460,USE_DDL_DRIVER,</Define>
               <Undefine></Undefine>
-              <IncludePath>../source;../../../../drivers/cmsis/Device/HDSC/hc32f4xx/Include;../../../../drivers/cmsis/Include;../../../../drivers/hc32_ll_driver/inc;..\..\RTT;..\..\Dev;..\..\Adp;..\..\App;..\..\Utils</IncludePath>
+              <IncludePath>../source;../../../../drivers/cmsis/Device/HDSC/hc32f4xx/Include;../../../../drivers/cmsis/Include;../../../../drivers/hc32_ll_driver/inc;..\..\RTT;..\..\Dev;..\..\Adp;..\..\App;..\..\Utils;..\..\ws</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -867,6 +867,16 @@
               <FileName>Params.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Utils\Params.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>ws</GroupName>
+          <Files>
+            <File>
+              <FileName>dev_commutation.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ws\dev_commutation.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -1733,6 +1743,16 @@
               <FileName>Params.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Utils\Params.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>ws</GroupName>
+          <Files>
+            <File>
+              <FileName>dev_commutation.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ws\dev_commutation.c</FilePath>
             </File>
           </Files>
         </Group>
