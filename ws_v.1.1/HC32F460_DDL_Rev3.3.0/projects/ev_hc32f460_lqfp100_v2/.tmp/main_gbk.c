@@ -17,6 +17,7 @@
   #include "hc32_ll_utility.h"
   #include "tmr4_pwm.h"
 #include "dev_commutation.h"
+#include "hall_sensor_3ch.h"
 
 //   /*=============================================================================
 //    * 全锟斤拷PWM实锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟绞癸拷茫锟?????
@@ -94,7 +95,7 @@
    * 锟斤拷锟斤拷锟斤拷
    *=============================================================================*/
   volatile int commu_num = 0;
-  volatile int comm_mode = 0;   /* 0=停, 1=正转, 2=反转 */
+  volatile int comm_mode = 0;   /* 0=停, 1=开环正转, 2=开环反转, 3=闭环正转, 4=闭环反转 */
   static int s_prev_mode = 0;
   static uint64_t s_last_step_time_us = 0;
   static uint64_t s_ramp_start_time_us = 0;
@@ -105,6 +106,49 @@
   #define RAMP_START_INTERVAL_US   5000UL   /* 起步 ~667 RPM */
   #define RAMP_TARGET_INTERVAL_US  5000UL   /* 目标 ~667 RPM */
   #define RAMP_DURATION_MS         3000UL
+
+  /* 闭环 Hall 传感器 */
+  static hall_3ch_handle_t s_hall_handle = NULL;
+
+  /* 映射表索引: 0~12, Keil Watch 里改, 无需重新编译 */
+  volatile int hall_table_index = 12;
+
+  /* 13 种映射: 0~5同向, 6~11反向, 12开环实测校正 */
+  static const uint8_t hall_tables[14][8] = {
+      /* === 同向: 步进+1 = 磁场CW === */
+      {0xFF, 0, 2, 1, 4, 5, 3, 0xFF},   /*  0: 磁场跟转子重合 */
+      {0xFF, 1, 3, 2, 5, 0, 4, 0xFF},   /*  1: 磁场领先 1 步 */
+      {0xFF, 2, 4, 3, 0, 1, 5, 0xFF},   /*  2: 磁场领先 2 步 */
+      {0xFF, 3, 5, 4, 1, 2, 0, 0xFF},   /*  3: 磁场领先 3 步 */
+      {0xFF, 4, 0, 5, 2, 3, 1, 0xFF},   /*  4: 磁场领先 4 步 */
+      {0xFF, 5, 1, 0, 3, 4, 2, 0xFF},   /*  5: 磁场领先 5 步 */
+      /* === 反向: 步进+1 = 磁场CCW (与Hall序列CW相反) === */
+      {0xFF, 5, 3, 4, 1, 0, 2, 0xFF},   /*  6: CW领先1 */
+      {0xFF, 0, 4, 5, 2, 1, 3, 0xFF},   /*  7: CW领先2 */
+      {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /*  8: CW领先3 */
+      {0xFF, 2, 0, 1, 4, 3, 5, 0xFF},   /*  9: CW领先4 */
+      {0xFF, 3, 1, 2, 5, 4, 0, 0xFF},   /* 10: CW领先5 */
+      {0xFF, 4, 2, 3, 0, 5, 1, 0xFF},   /* 11: CW领先0(重合) */
+      /* === 开环实测校正 === */
+      {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /* 12: CW→step递减 [0x03→0,0x02→5,0x06→4,0x04→3,0x05→2,0x01→1] */
+      {0xFF, 5, 1, 0, 3, 4, 2, 0xFF},   /* 13: CCW→step递增 [0x03→0,0x01→5,0x05→4,0x04→3,0x06→2,0x02→1] */
+  };
+
+  /* Hall 回调: ISR 内调, 直接换相 */
+  static void on_hall_step(uint8_t step, hall3_direction_t dir)
+  {
+      (void)dir;
+      Commutation_Step(step, COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
+  }
+
+  /* Hall 故障回调: 000/111 → 切到滑行 */
+  static void on_hall_fault(uint8_t hall_state)
+  {
+      (void)hall_state;
+      comm_mode = 0;
+      MAIN_D("[COMM] Hall fault state=0x%02X, coast", hall_state);
+  }
+
   int main(void)
   {
       Hardware_Init();
@@ -153,7 +197,26 @@
       for (ch = 0; ch < 3; ch++) {
           TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch, TMR4_MODE_SYNC, 98.0f);
       }
-      s_prev_mode = 0;
+
+      /* 初始化 Hall 传感器 (3路闭环) */
+      static const hall_3ch_config_t hall_cfg = {
+          .port      = {GPIO_PORT_A, GPIO_PORT_A, GPIO_PORT_A},
+          .pin       = {GPIO_PIN_10, GPIO_PIN_09, GPIO_PIN_08},  /* U=PA10, V=PA9, W=PA8 */
+          .eirq_ch   = {EXTINT_CH10, EXTINT_CH09, EXTINT_CH08},
+          .irqn      = {INT010_IRQn, INT009_IRQn, INT008_IRQn},
+          .irq_src   = {INT_SRC_PORT_EIRQ10, INT_SRC_PORT_EIRQ9, INT_SRC_PORT_EIRQ8},
+          .irq_priority = DDL_IRQ_PRIO_02,
+          .pole_pairs   = 3,
+          .hall_to_step = {0xFF,1,3,2,5,0,4,0xFF},   /* step0→0x01, 磁场领先: 0x01→1,0x02→3,0x03→2,0x04→5,0x05→0,0x06→4 */
+          .on_step      = on_hall_step,
+          .on_fault     = on_hall_fault,
+          .align_step        = 0,
+          .align_duty_pct    = COMM_DUTY_PCT,
+          .align_duration_ms = 500,
+          .stall_timeout_ms  = 500,
+      };
+      s_hall_handle = hall_3ch_create(&hall_cfg);
+      MAIN_D("[MAIN] Hall sensor created");
 
       EventBus_Enable();
 
@@ -165,31 +228,41 @@
               s_prev_mode = comm_mode;
 
               if (comm_mode == 0) {
-                  /* 滑行: 三相全设为98% SYNC -> H=L -> H=HIGH/L=HIGH 上管全通 -> 三相同电位 -> 自由滑行 */
+                  /* 滑行 */
                   int ch;
+                  hall_3ch_stop(s_hall_handle);
                   for (ch = 0; ch < 3; ch++) {
                       TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch, TMR4_MODE_SYNC, 98.0f);
                   }
                   MAIN_D("[COMM] Mode=0: COAST");
-              } else {
-                  /* 启动: 复位到 step0, 开始斜坡加速 */
+              } else if (comm_mode == 1 || comm_mode == 2) {
+                  /* 开环启动 */
+                  hall_3ch_stop(s_hall_handle);
                   commu_num = 0;
                   s_ramp_start_time_us = Timer6_Timebase_GetTimestamp();
                   s_current_interval_us = RAMP_START_INTERVAL_US;
                   s_last_step_time_us = s_ramp_start_time_us;
                   Commutation_Init();
                   COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
-                  MAIN_D("[COMM] Mode=%d: START, ramp %lu -> %lu us",
-                         comm_mode, (uint32_t)RAMP_START_INTERVAL_US, (uint32_t)RAMP_TARGET_INTERVAL_US);
+                  MAIN_D("[COMM] Mode=%d: OPEN-LOOP START", comm_mode);
+              } else if (comm_mode == 3) {
+                  /* 闭环正转: CW表(step递减) */
+                  hall_3ch_set_table(s_hall_handle, hall_tables[12]);
+                  hall_3ch_start(s_hall_handle, HALL3_DIR_FORWARD);
+                  MAIN_D("[COMM] Mode=3: CLOSED-LOOP FWD (table12)");
+              } else if (comm_mode == 4) {
+                  /* 闭环反转: CCW表(step递增) */
+                  hall_3ch_set_table(s_hall_handle, hall_tables[13]);
+                  hall_3ch_start(s_hall_handle, HALL3_DIR_REVERSE);
+                  MAIN_D("[COMM] Mode=4: CLOSED-LOOP REV (table13)");
               }
           }
 
-          /* 运行状态: 斜坡加速 + 定时步进 */
-          if (comm_mode != 0) {
+          /* 开环运行: 定时步进 */
+          if (comm_mode == 1 || comm_mode == 2) {
               Timer6_Timebase_UpdateTimestamp();
               uint64_t now = Timer6_Timebase_GetTimestamp();
 
-              /* 斜坡: 线性加速, 从 RAMP_START 到 RAMP_TARGET */
               uint64_t ramp_elapsed = now - s_ramp_start_time_us;
               uint64_t ramp_total = RAMP_DURATION_MS * 1000UL;
               if (ramp_elapsed < ramp_total) {
@@ -202,15 +275,21 @@
 
               if ((now - s_last_step_time_us) >= s_current_interval_us) {
                   s_last_step_time_us = now;
-
                   if (comm_mode == 1) {
-                      /* 正转: step +1 */
                       commu_num = (commu_num + 1) % 6;
                   } else {
-                      /* 反转: step -1 (等价于 +5 mod 6) */
                       commu_num = (commu_num + 5) % 6;
                   }
                   Commutation_Step((uint8_t)commu_num, COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
+              }
+          }
+
+          /* 闭环运行: Hall ISR 驱动, 只做维护 */
+          if (comm_mode == 3 || comm_mode == 4) {
+              hall_3ch_update(s_hall_handle);
+              if (hall_3ch_is_stalled(s_hall_handle)) {
+                  comm_mode = 0;
+                  MAIN_D("[COMM] Closed-loop stall, coast");
               }
           }
       }

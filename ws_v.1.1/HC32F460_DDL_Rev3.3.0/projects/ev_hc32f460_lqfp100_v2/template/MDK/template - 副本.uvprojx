@@ -878,6 +878,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\ws\dev_commutation.c</FilePath>
             </File>
+            <File>
+              <FileName>hall_sensor_3ch.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ws\hall_sensor_3ch.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>
@@ -1753,6 +1758,11 @@
               <FileName>dev_commutation.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\ws\dev_commutation.c</FilePath>
+            </File>
+            <File>
+              <FileName>hall_sensor_3ch.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ws\hall_sensor_3ch.c</FilePath>
             </File>
           </Files>
         </Group>
