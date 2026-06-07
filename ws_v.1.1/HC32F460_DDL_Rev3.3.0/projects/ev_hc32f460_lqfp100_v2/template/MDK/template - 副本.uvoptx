@@ -301,6 +301,11 @@
           <WinNumber>2</WinNumber>
           <ItemText>commu_num</ItemText>
         </Ww>
+        <Ww>
+          <count>1</count>
+          <WinNumber>2</WinNumber>
+          <ItemText>comm_mode</ItemText>
+        </Ww>
       </WatchWindow2>
       <Tracepoint>
         <THDelay>0</THDelay>
