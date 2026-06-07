@@ -101,10 +101,10 @@
   static uint32_t s_current_interval_us = 0;
   #define COMM_PWM_FREQ_HZ           50000UL
   #define COMM_DUTY_PCT              50.0f
-  /* 斜坡加速: 从慢到快, 3秒完成 */
-  #define RAMP_START_INTERVAL_US  10000UL   /* 起步 ~333 RPM */
-  #define RAMP_TARGET_INTERVAL_US  3333UL   /* 目标 ~1000 RPM */
-  #define RAMP_DURATION_MS         3000UL   /* 加速时间 3秒 */
+  /* 固定换相间隔, 无斜坡 */
+  #define RAMP_START_INTERVAL_US   5000UL   /* 起步 ~667 RPM */
+  #define RAMP_TARGET_INTERVAL_US  5000UL   /* 目标 ~667 RPM */
+  #define RAMP_DURATION_MS         3000UL
   int main(void)
   {
       Hardware_Init();
