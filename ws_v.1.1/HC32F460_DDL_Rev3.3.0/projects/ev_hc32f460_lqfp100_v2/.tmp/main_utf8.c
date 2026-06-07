@@ -131,7 +131,7 @@
       {0xFF, 4, 2, 3, 0, 5, 1, 0xFF},   /* 11: CW领先0(重合) */
       /* === 开环实测校正 === */
       {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /* 12: CW→step递减 [0x03→0,0x02→5,0x06→4,0x04→3,0x05→2,0x01→1] */
-      {0xFF, 5, 1, 0, 3, 4, 2, 0xFF},   /* 13: CCW→step递增 [0x03→0,0x01→5,0x05→4,0x04→3,0x06→2,0x02→1] */
+      {0xFF, 2, 0, 1, 3, 5, 4, 0xFF},   /* 13: CCW,磁场CCW超前 [0x01→2,0x02→0,0x03→1,0x04→3,0x05→5,0x06→4] */
   };
 
   /* Hall 回调: ISR 内调, 直接换相 */
@@ -246,15 +246,15 @@
                   COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
                   MAIN_D("[COMM] Mode=%d: OPEN-LOOP START", comm_mode);
               } else if (comm_mode == 3) {
-                  /* 闭环正转: CW表(step递减) */
+                  /* CW: 表12, 踢step+1 */
                   hall_3ch_set_table(s_hall_handle, hall_tables[12]);
                   hall_3ch_start(s_hall_handle, HALL3_DIR_FORWARD);
-                  MAIN_D("[COMM] Mode=3: CLOSED-LOOP FWD (table12)");
+                  MAIN_D("[COMM] Mode=3: CW (table12)");
               } else if (comm_mode == 4) {
-                  /* 闭环反转: CCW表(step递增) */
-                  hall_3ch_set_table(s_hall_handle, hall_tables[13]);
+                  /* CCW: 表12(同表), 踢step+5 */
+                  hall_3ch_set_table(s_hall_handle, hall_tables[12]);
                   hall_3ch_start(s_hall_handle, HALL3_DIR_REVERSE);
-                  MAIN_D("[COMM] Mode=4: CLOSED-LOOP REV (table13)");
+                  MAIN_D("[COMM] Mode=4: CCW (table12, rev kick)");
               }
           }
 
