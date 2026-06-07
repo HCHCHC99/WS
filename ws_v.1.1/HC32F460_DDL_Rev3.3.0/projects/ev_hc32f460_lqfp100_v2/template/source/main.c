@@ -97,9 +97,14 @@
   volatile int comm_mode = 0;   /* 0=停, 1=正转, 2=反转 */
   static int s_prev_mode = 0;
   static uint64_t s_last_step_time_us = 0;
-  #define COMM_STEP_INTERVAL_US  5000UL   /* 5ms per step -> ~667 RPM (3 pole pairs) */
-  #define COMM_PWM_FREQ_HZ       50000UL
-  #define COMM_DUTY_PCT          20.0f
+  static uint64_t s_ramp_start_time_us = 0;
+  static uint32_t s_current_interval_us = 0;
+  #define COMM_PWM_FREQ_HZ           50000UL
+  #define COMM_DUTY_PCT              50.0f
+  /* 斜坡加速: 从慢到快, 3秒完成 */
+  #define RAMP_START_INTERVAL_US  10000UL   /* 起步 ~333 RPM */
+  #define RAMP_TARGET_INTERVAL_US  3333UL   /* 目标 ~1000 RPM */
+  #define RAMP_DURATION_MS         3000UL   /* 加速时间 3秒 */
   int main(void)
   {
       Hardware_Init();
@@ -167,21 +172,35 @@
                   }
                   MAIN_D("[COMM] Mode=0: COAST");
               } else {
-                  /* 启动: 复位到 step0, 记录起始时间 */
+                  /* 启动: 复位到 step0, 开始斜坡加速 */
                   commu_num = 0;
+                  s_ramp_start_time_us = Timer6_Timebase_GetTimestamp();
+                  s_current_interval_us = RAMP_START_INTERVAL_US;
+                  s_last_step_time_us = s_ramp_start_time_us;
                   Commutation_Init();
                   COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
-                  s_last_step_time_us = Timer6_Timebase_GetTimestamp();
-                  MAIN_D("[COMM] Mode=%d: START, step=0", comm_mode);
+                  MAIN_D("[COMM] Mode=%d: START, ramp %lu -> %lu us",
+                         comm_mode, (uint32_t)RAMP_START_INTERVAL_US, (uint32_t)RAMP_TARGET_INTERVAL_US);
               }
           }
 
-          /* 运行状态: 定时步进 */
+          /* 运行状态: 斜坡加速 + 定时步进 */
           if (comm_mode != 0) {
               Timer6_Timebase_UpdateTimestamp();
               uint64_t now = Timer6_Timebase_GetTimestamp();
 
-              if ((now - s_last_step_time_us) >= COMM_STEP_INTERVAL_US) {
+              /* 斜坡: 线性加速, 从 RAMP_START 到 RAMP_TARGET */
+              uint64_t ramp_elapsed = now - s_ramp_start_time_us;
+              uint64_t ramp_total = RAMP_DURATION_MS * 1000UL;
+              if (ramp_elapsed < ramp_total) {
+                  s_current_interval_us = RAMP_START_INTERVAL_US
+                      - (uint32_t)((RAMP_START_INTERVAL_US - RAMP_TARGET_INTERVAL_US)
+                                   * ramp_elapsed / ramp_total);
+              } else {
+                  s_current_interval_us = RAMP_TARGET_INTERVAL_US;
+              }
+
+              if ((now - s_last_step_time_us) >= s_current_interval_us) {
                   s_last_step_time_us = now;
 
                   if (comm_mode == 1) {
