@@ -58,6 +58,7 @@ typedef struct hall_3ch_instance_t {
     uint32_t          interval_history[6];
     uint8_t           interval_idx;
     uint8_t           interval_valid_count;
+    volatile uint32_t last_pulse_id;   /* 去重: 上次加入窗口的 pulse_counter */
 
     /* 对齐启动 */
     hall3_direction_t  target_dir;
@@ -85,7 +86,6 @@ volatile uint8_t  g_hall_last_step  = 0;
 
 /* ========== 内部声明 ========== */
 static void hall_common_handler(uint8_t ch);
-static void update_direction(hall_3ch_instance_t *inst, uint8_t step);
 
 /* ========== 系统初始化 ========== */
 void hall_3ch_system_init(void)
@@ -112,11 +112,11 @@ static void register_hall_irq(hall_3ch_instance_t *inst, uint8_t ch, func_ptr_t 
 
     g_irq_map[ch] = inst;
 
-    /* EXTINT: 双边沿, 无滤波 */
+    /* EXTINT: 双边沿, 硬件滤波 (PCLK1/64≈1.56MHz, 滤除<~10μs 毛刺) */
     memset(&stcExti, 0, sizeof(stcExti));
     stcExti.u32Edge        = EXTINT_TRIG_BOTH;
-    stcExti.u32Filter      = EXTINT_FILTER_OFF;
-    stcExti.u32FilterClock = EXTINT_FCLK_DIV1;
+    stcExti.u32Filter      = EXTINT_FILTER_ON;
+    stcExti.u32FilterClock = EXTINT_FCLK_DIV64;
     EXTINT_Init(eirq_ch, &stcExti);
 
     /* GPIO: 数字输入, 上拉 */
@@ -167,7 +167,7 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* 去重2: 间隔太短 → 抖动回退 */
+    /* 去重2: 间隔太短 → 电气抖动, 不更新 last_hall_state */
     uint32_t interval = Timer6_Timebase_GetDelta();
     uint32_t interval_us = Timer6_Timebase_DeltaToUs(interval);
     if (interval_us < MIN_PULSE_INTERVAL_US) {
@@ -189,49 +189,36 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* 记录间隔 */
-    inst->last_pulse_interval_us = interval_us;
-    inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
-    inst->pulse_counter++;
-
-    /* 非 RUNNING 状态: 只观测, 不换相 */
+    /* 非 RUNNING 状态: 只更新时间戳(防止对齐完成后立即误报堵转), 不记录间隔也不换相 */
     if (inst->state != STATE_RUNNING) {
+        inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
         MAIN_D("[HALL] ch=%d raw=0x%02X -> step=%d (%s)",
                ch, state, step,
                (inst->state == STATE_ALIGNING) ? "align" : "idle");
         return;
     }
 
-    /* RUNNING 状态: 判向 + 换相 */
-    update_direction(inst, step);
-
-    if (inst->config.on_step) {
-        MAIN_D("[HALL] ch=%d raw=0x%02X -> step=%d dir=%d",
-               ch, state, step, (int)inst->current_dir);
-        inst->config.on_step(step, inst->current_dir);
-    }
-}
-
-/* ========== 方向判定: 基于 step 序列 ========== */
-static void update_direction(hall_3ch_instance_t *inst, uint8_t step)
-{
+    /* RUNNING 状态: 先判向, 只有合法跳变才记录间隔 */
     hall3_direction_t tentative;
-
     int8_t diff = (int8_t)step - (int8_t)inst->last_step;
     if (diff < 0) diff += 6;
-
     if (diff == 1) {
         tentative = HALL3_DIR_FORWARD;
     } else if (diff == 5) {
         tentative = HALL3_DIR_REVERSE;
     } else {
-        /* 乱序跳转, 忽略 */
+        /* 乱序跳转 (振动/干扰), 更新 last_step 防止连锁误判, 但不记录间隔也不换相 */
         inst->last_step = step;
         return;
     }
-
     inst->last_step = step;
 
+    /* 合法跳变: 记录间隔和时间戳 */
+    inst->last_pulse_interval_us = interval_us;
+    inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
+    inst->pulse_counter++;
+
+    /* 方向确认 (需连续多次同向) */
     if (tentative != inst->current_dir) {
         inst->dir_confirm_count++;
         if (inst->dir_confirm_count >= DIR_CONFIRM_COUNT) {
@@ -241,7 +228,15 @@ static void update_direction(hall_3ch_instance_t *inst, uint8_t step)
     } else {
         inst->dir_confirm_count = 0;
     }
+
+    /* 换相回调 */
+    if (inst->config.on_step) {
+        MAIN_D("[HALL] ch=%d raw=0x%02X -> step=%d dir=%d",
+               ch, state, step, (int)inst->current_dir);
+        inst->config.on_step(step, inst->current_dir);
+    }
 }
+
 
 /* ========== RPM 滤波 ========== */
 static void update_rpm_filter(hall_3ch_instance_t *inst, float raw)
@@ -261,14 +256,41 @@ static void update_rpm_filter(hall_3ch_instance_t *inst, float raw)
 /* ========== 平均间隔 ========== */
 static float average_interval_us(hall_3ch_instance_t *inst)
 {
-    if (inst->last_pulse_interval_us >= MIN_PULSE_INTERVAL_US
-        && inst->last_pulse_interval_us <= MAX_PULSE_INTERVAL_US) {
-        inst->interval_history[inst->interval_idx] = inst->last_pulse_interval_us;
-        inst->interval_idx = (inst->interval_idx + 1) % 6;
-        if (inst->interval_valid_count < 6) {
-            inst->interval_valid_count++;
+    uint32_t interval_us = inst->last_pulse_interval_us;
+    uint32_t pulse_id    = inst->pulse_counter;
+
+    /* 去重: 同一个脉冲不重复加入窗口 */
+    if (pulse_id == inst->last_pulse_id) {
+        goto calc;
+    }
+
+    /* 范围检查 */
+    if (interval_us < MIN_PULSE_INTERVAL_US || interval_us > MAX_PULSE_INTERVAL_US) {
+        goto calc;
+    }
+
+    /* 离群值 rejection: 如果当前窗口已有足够样本, 拒绝偏离均值 4x 以上的值
+     * (电机惯性不可能在相邻两次换相间瞬时加速/减速超过 4 倍) */
+    if (inst->interval_valid_count >= 3) {
+        uint32_t sum_check = 0;
+        for (uint8_t i = 0; i < inst->interval_valid_count; i++) {
+            sum_check += inst->interval_history[i];
+        }
+        float avg = (float)sum_check / (float)inst->interval_valid_count;
+        if ((float)interval_us < avg * 0.25f || (float)interval_us > avg * 4.0f) {
+            goto calc;  /* 离群值, 丢弃不加入窗口 */
         }
     }
+
+    /* 加入滑动窗口 */
+    inst->interval_history[inst->interval_idx] = interval_us;
+    inst->interval_idx = (inst->interval_idx + 1) % 6;
+    if (inst->interval_valid_count < 6) {
+        inst->interval_valid_count++;
+    }
+    inst->last_pulse_id = pulse_id;
+
+calc:
     if (inst->interval_valid_count < 2) return 0.0f;
 
     uint32_t sum = 0;
@@ -361,6 +383,39 @@ void hall_3ch_start(hall_3ch_handle_t h, hall3_direction_t dir)
 
     MAIN_D("[HALL3] Start aligning step=%d dir=%d",
            inst->config.align_step, (int)dir);
+}
+
+void hall_3ch_start_flying(hall_3ch_handle_t h, hall3_direction_t dir)
+{
+    if (!h) return;
+    hall_3ch_instance_t *inst = (hall_3ch_instance_t *)h;
+    if (!inst->valid) return;
+
+    inst->target_dir  = dir;
+    inst->stalled     = 0;
+    inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
+
+    /* 读当前 Hall 状态, 查表得到当前换相步, 跳过对齐直接进入 RUNNING */
+    uint8_t hall_state = 0;
+    hall_state |= (GPIO_ReadInputPins(inst->gpio_port[0], inst->gpio_pin[0]) == PIN_SET) ? 0x04u : 0x00u;
+    hall_state |= (GPIO_ReadInputPins(inst->gpio_port[1], inst->gpio_pin[1]) == PIN_SET) ? 0x02u : 0x00u;
+    hall_state |= (GPIO_ReadInputPins(inst->gpio_port[2], inst->gpio_pin[2]) == PIN_SET) ? 0x01u : 0x00u;
+
+    uint8_t step = inst->config.hall_to_step[hall_state];
+    if (step == 0xFFu) {
+        step = 0;  /* 000/111 异常, fallback 到 step 0 */
+    }
+
+    inst->state           = STATE_RUNNING;
+    inst->last_step       = step;
+    inst->last_hall_state = hall_state;
+
+    if (inst->config.on_step) {
+        inst->config.on_step(step, dir);
+    }
+
+    MAIN_D("[HALL3] Flying start: hall=0x%02X step=%d dir=%d",
+           hall_state, step, (int)dir);
 }
 
 void hall_3ch_stop(hall_3ch_handle_t h)

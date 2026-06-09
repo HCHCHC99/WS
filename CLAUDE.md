@@ -283,16 +283,52 @@ Invalid states 0x00 and 0x07 → 0xFF (fault callback).
 
 **Alignment startup:** Apply `align_step` for `align_duration_ms` (pulls rotor to known position), then kick one step forward/reverse, then transition to RUNNING (ISR takes over).
 
-**RPM:** `60,000,000 / (avg_interval_us × pole_pairs × 6)` with 6-sample sliding window.
+**RPM:** `60,000,000 / (avg_interval_us × pole_pairs × 6)` with 6-sample sliding window. RPM measurement has three layers of noise protection:
+1. **ISR-level:** Only valid step transitions (diff = ±1 mod 6) record intervals. Invalid jumps (vibration/noise) are discarded before interval recording.
+2. **Dedup:** `last_pulse_id` prevents the same ISR interval from being added to the sliding window multiple times in successive `hall_3ch_update()` calls.
+3. **Outlier rejection:** Intervals deviating >4x from the current 6-sample moving average are discarded (motor inertia prevents instantaneous 4x speed changes).
+
+**Runtime Hall table calibration (16 tables in `hall_tables[16][8]`):**
+
+`main.c` contains 16 pre-computed Hall-to-step lookup tables. Mode 3 (CW) uses `hall_tables[hall_table_cw]`, mode 4 (CCW) uses `hall_tables[hall_table_ccw]`. Both indices are independently adjustable in Keil Watch — e.g., change `hall_table_cw=14` and `hall_table_ccw=15` to test CW/CCW without recompiling.
+
+| Index | Purpose |
+|-------|---------|
+| 0-5 | Synchronous alignment offsets 0-5 (magnetic field CW rotation) |
+| 6-11 | Reverse-direction tables (magnetic field CCW rotation) |
+| 12 | Empirically corrected CW table from open-loop test data |
+| 13 | Empirically corrected CCW table (opposite of 12) |
+| 14 | **Lead-angle forward** (sector+90° voltage vector) — **default** |
+| 15 | **Lead-angle reverse** (sector-90° voltage vector) |
+
+Table 12 was derived by running open-loop CW and recording which Hall state corresponds to which commutation step. Tables 14/15 apply a +90°/-90° phase advance for better torque at speed (field-oriented control approximation).
+
+The `hall_cfg.hall_to_step` initialization table (`{0xFF,1,3,2,5,0,4,0xFF}`) is only used during alignment startup. After alignment, `hall_3ch_set_table()` replaces it with the selected `hall_tables[index]` before transitioning to RUNNING state. The alignment table is a "cogging torque" alignment sequence; the runtime table is the actual commutation mapping.
 
 **Operating modes** (set by `comm_mode` variable in `main.c`):
 | Mode | Description |
 |------|-------------|
 | 0 | Coast — all 3 phases 98% SYNC (all upper FETs → same potential → no current) |
-| 1 | Open-loop forward (timer-driven step sequence, ~333→667 RPM over 3s) |
-| 2 | Open-loop reverse |
-| 3 | Closed-loop CW (Hall ISR-driven, 500ms alignment startup) |
-| 4 | Closed-loop CCW (same table, opposite kick direction) |
+| 1 | Open-loop forward (timer-driven step sequence, constant ~667 RPM) |
+| 2 | Open-loop reverse (same, reversed step direction) |
+| 3 | **Open-loop ramp → flying start CW** (2s ramp 167→1111 RPM → read Hall → skip alignment → closed-loop) |
+| 4 | **Open-loop ramp → flying start CCW** (same, reversed direction) |
+
+Mode 3/4 use a `comm_sub_phase` state machine:
+- **Phase 0** (`comm_sub_phase=0`): Open-loop forced commutation with linear ramp over `OL_RAMP_DURATION_MS` (2000ms). Interval ramps from `OL_START_INTERVAL_US` (20000μs, ~167 RPM) to `OL_TARGET_INTERVAL_US` (3000μs, ~1111 RPM). Uses `g_comm_duty_pct`.
+- **Phase 1** (`comm_sub_phase=1`): Ramp complete → `hall_3ch_start_flying()` reads current Hall GPIOs, looks up the corresponding commutation step, sets `last_step`, and enters RUNNING directly — **no alignment, no coast**. Mode 3 uses `hall_tables[hall_table_cw]`, mode 4 uses `hall_tables[hall_table_ccw]`. The Hall ISR takes over seamlessly. Stall detection triggers coast (mode 0).
+
+Modes 1/2 are pure open-loop with fixed 5000μs step interval (COMM_PWM_FREQ_HZ=50kHz). The ramp infrastructure (RAMP_START→RAMP_TARGET over RAMP_DURATION) is present but configured with start=target=5000μs (constant speed).
+
+**Runtime Debug Variables** (modifiable in Keil Watch window without recompiling):
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `g_comm_duty_pct` | `volatile float` | 80.0 | PWM duty cycle for both open-loop and closed-loop commutation |
+| `hall_table_cw` | `volatile int` | 14 | Hall table selector for mode 3 (CW closed-loop) |
+| `hall_table_ccw` | `volatile int` | 15 | Hall table selector for mode 4 (CCW closed-loop) |
+| `comm_mode` | `volatile int` | 0 | Operating mode (0=coast, 1=open-loop FWD, 2=open-loop REV, 3=closed-loop CW, 4=closed-loop CCW) |
+
+The Hall sensor module also exports debug globals: `g_hall_rpm`, `g_hall_state`, `g_hall_dir`, `g_hall_running`, `g_hall_stalled`, `g_hall_last_step`.
 
 ### Motor Ramp Control
 

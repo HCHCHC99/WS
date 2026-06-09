@@ -49,6 +49,7 @@ hall_3ch_handle_t hall_3ch_create(const hall_3ch_config_t *cfg);
 void              hall_3ch_destroy(hall_3ch_handle_t h);
 
 void              hall_3ch_start(hall_3ch_handle_t h, hall3_direction_t dir);
+void              hall_3ch_start_flying(hall_3ch_handle_t h, hall3_direction_t dir);  /* 飞行启动, 跳过对齐 */
 void              hall_3ch_stop(hall_3ch_handle_t h);    /* 停, 回 IDLE */
 void              hall_3ch_set_table(hall_3ch_handle_t h, const uint8_t table[8]);
 

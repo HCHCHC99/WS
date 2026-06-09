@@ -101,17 +101,27 @@
   static uint64_t s_ramp_start_time_us = 0;
   static uint32_t s_current_interval_us = 0;
   #define COMM_PWM_FREQ_HZ           50000UL
-  #define COMM_DUTY_PCT              80.0f
+  volatile float g_comm_duty_pct = 80.0f;  /* Keil Watch 可改, 闭环PWM占空比 */
   /* 固定换相间隔, 无斜坡 */
   #define RAMP_START_INTERVAL_US   5000UL   /* 起步 ~667 RPM */
   #define RAMP_TARGET_INTERVAL_US  5000UL   /* 目标 ~667 RPM */
   #define RAMP_DURATION_MS         3000UL
 
+  /* 开环强拖切闭环参数 */
+  volatile int comm_sub_phase = 0;        /* 0=开环强拖, 1=闭环 */
+  static uint64_t s_ol_ramp_start_us = 0;
+  static uint64_t s_ol_last_step_us = 0;
+  static uint32_t s_ol_current_interval_us = 0;
+  #define OL_START_INTERVAL_US    20000UL  /* 起步 ~167 RPM, 低速大扭矩 */
+  #define OL_TARGET_INTERVAL_US    3000UL  /* 目标 ~1111 RPM */
+  #define OL_RAMP_DURATION_MS      2000UL  /* 强拖 2 秒 */
+
   /* 闭环 Hall 传感器 */
   static hall_3ch_handle_t s_hall_handle = NULL;
 
-  /* 映射表索引: 0~15, Keil Watch 里改, 无需重新编译 */
-  volatile int hall_table_index = 14;
+  /* Hall 映射表索引: Keil Watch 可改, 各模式独立 */
+  volatile int hall_table_cw  = 14;  /* mode 3 闭环正转用 */
+  volatile int hall_table_ccw = 15;  /* mode 4 闭环反转用 */
 
   /* 16 种映射: 0~5同向, 6~11反向, 12开环实测校正, 13 CCW(磁场超前), 14 推导正转, 15 推导反转 */
   static const uint8_t hall_tables[16][8] = {
@@ -141,7 +151,7 @@
   static void on_hall_step(uint8_t step, hall3_direction_t dir)
   {
       (void)dir;
-      Commutation_Step(step, COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
+      Commutation_Step(step, COMM_PWM_FREQ_HZ, g_comm_duty_pct);
   }
 
   /* Hall 故障回调: 000/111 → 切到滑行 */
@@ -214,7 +224,7 @@
           .on_step      = on_hall_step,
           .on_fault     = on_hall_fault,
           .align_step        = 0,
-          .align_duty_pct    = COMM_DUTY_PCT,
+          .align_duty_pct    = 80.0f,
           .align_duration_ms = 500,
           .stall_timeout_ms  = 500,
       };
@@ -233,6 +243,7 @@
               if (comm_mode == 0) {
                   /* 滑行 */
                   int ch;
+                  comm_sub_phase = 0;
                   hall_3ch_stop(s_hall_handle);
                   for (ch = 0; ch < 3; ch++) {
                       TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch, TMR4_MODE_SYNC, 98.0f);
@@ -246,18 +257,30 @@
                   s_current_interval_us = RAMP_START_INTERVAL_US;
                   s_last_step_time_us = s_ramp_start_time_us;
                   Commutation_Init();
-                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
+                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, g_comm_duty_pct);
                   MAIN_D("[COMM] Mode=%d: OPEN-LOOP START", comm_mode);
               } else if (comm_mode == 3) {
-                  /* CW: 表14, 扇区+90°正转 */
-                  hall_3ch_set_table(s_hall_handle, hall_tables[14]);
-                  hall_3ch_start(s_hall_handle, HALL3_DIR_FORWARD);
-                  MAIN_D("[COMM] Mode=3: CW (table14, sector+90)");
+                  /* CW: 开环强拖 → 切闭环 */
+                  hall_3ch_stop(s_hall_handle);
+                  Commutation_Init();
+                  commu_num = 0;
+                  s_ol_ramp_start_us = Timer6_Timebase_GetTimestamp();
+                  s_ol_current_interval_us = OL_START_INTERVAL_US;
+                  s_ol_last_step_us = s_ol_ramp_start_us;
+                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, g_comm_duty_pct);
+                  comm_sub_phase = 0;
+                  MAIN_D("[COMM] Mode=3: Open-loop ramp -> closed-loop (CW)");
               } else if (comm_mode == 4) {
-                  /* CCW: 表15, 扇区-90°反转 */
-                  hall_3ch_set_table(s_hall_handle, hall_tables[15]);
-                  hall_3ch_start(s_hall_handle, HALL3_DIR_REVERSE);
-                  MAIN_D("[COMM] Mode=4: CCW (table15, sector-90)");
+                  /* CCW: 开环强拖 → 切闭环 */
+                  hall_3ch_stop(s_hall_handle);
+                  Commutation_Init();
+                  commu_num = 0;
+                  s_ol_ramp_start_us = Timer6_Timebase_GetTimestamp();
+                  s_ol_current_interval_us = OL_START_INTERVAL_US;
+                  s_ol_last_step_us = s_ol_ramp_start_us;
+                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, g_comm_duty_pct);
+                  comm_sub_phase = 0;
+                  MAIN_D("[COMM] Mode=4: Open-loop ramp -> closed-loop (CCW)");
               }
           }
 
@@ -283,16 +306,58 @@
                   } else {
                       commu_num = (commu_num + 5) % 6;
                   }
-                  Commutation_Step((uint8_t)commu_num, COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
+                  Commutation_Step((uint8_t)commu_num, COMM_PWM_FREQ_HZ, g_comm_duty_pct);
               }
           }
 
-          /* 闭环运行: Hall ISR 驱动, 只做维护 */
+          /* 模式3/4: 开环强拖 → 飞行启动切闭环 */
           if (comm_mode == 3 || comm_mode == 4) {
-              hall_3ch_update(s_hall_handle);
-              if (hall_3ch_is_stalled(s_hall_handle)) {
-                  comm_mode = 0;
-                  MAIN_D("[COMM] Closed-loop stall, coast");
+              Timer6_Timebase_UpdateTimestamp();
+              uint64_t now = Timer6_Timebase_GetTimestamp();
+
+              if (comm_sub_phase == 0) {
+                  /* === 阶段0: 开环强拖 + 斜坡 (OL_START → OL_TARGET) === */
+                  uint64_t ramp_elapsed = now - s_ol_ramp_start_us;
+                  uint64_t ramp_total = OL_RAMP_DURATION_MS * 1000UL;
+                  if (ramp_elapsed < ramp_total) {
+                      s_ol_current_interval_us = OL_START_INTERVAL_US
+                          - (uint32_t)((OL_START_INTERVAL_US - OL_TARGET_INTERVAL_US)
+                                       * ramp_elapsed / ramp_total);
+                  } else {
+                      s_ol_current_interval_us = OL_TARGET_INTERVAL_US;
+                  }
+
+                  if ((now - s_ol_last_step_us) >= s_ol_current_interval_us) {
+                      s_ol_last_step_us = now;
+                      if (comm_mode == 3) {
+                          commu_num = (commu_num + 1) % 6;
+                      } else {
+                          commu_num = (commu_num + 5) % 6;
+                      }
+                      Commutation_Step((uint8_t)commu_num, COMM_PWM_FREQ_HZ, g_comm_duty_pct);
+                  }
+
+                  /* 斜坡完成 → 飞行启动切闭环 (读 Hall 当前位置, 跳过对齐) */
+                  if (ramp_elapsed >= ramp_total) {
+                      if (comm_mode == 3) {
+                          hall_3ch_set_table(s_hall_handle, hall_tables[hall_table_cw]);
+                          hall_3ch_start_flying(s_hall_handle, HALL3_DIR_FORWARD);
+                      } else {
+                          hall_3ch_set_table(s_hall_handle, hall_tables[hall_table_ccw]);
+                          hall_3ch_start_flying(s_hall_handle, HALL3_DIR_REVERSE);
+                      }
+                      comm_sub_phase = 1;
+                      MAIN_D("[COMM] Mode=%d: Flying start -> closed-loop", comm_mode);
+                  }
+
+              } else {
+                  /* === 阶段1: 闭环运行 (Hall ISR 驱动换相) === */
+                  hall_3ch_update(s_hall_handle);
+                  if (hall_3ch_is_stalled(s_hall_handle)) {
+                      comm_mode = 0;
+                      comm_sub_phase = 0;
+                      MAIN_D("[COMM] Closed-loop stall, coast");
+                  }
               }
           }
       }
