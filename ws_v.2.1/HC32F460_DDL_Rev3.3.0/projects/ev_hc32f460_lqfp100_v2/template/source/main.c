@@ -3,362 +3,151 @@
   #include "Hardware.h"
   #include "rtt_log.h"
   #include "timer6_timebase.h"
-  #include "Motor_hall.h"
   #include "TickTimer.h"
-  #include "device_manager.h"
   #include "App_Motor_Project.h"
-  #include "param_manager.h"
-  #include "Gpio_io.h"
   #include "App_Comm.h"
-  #include "Params.h"
   #include "App_FaultHandler.h"
   #include "rtt_manager.h"
-  #include "Pwm.h"
   #include "hc32_ll_utility.h"
   #include "tmr4_pwm.h"
-#include "dev_commutation.h"
-#include "hall_sensor_3ch.h"
+#include "dev_comm_runner.h"
 
-//   /*=============================================================================
-//    * È«ï¿½ï¿½PWMÊµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½Ã£ï¿?????
-//    *=============================================================================*/
-  pwm_t g_motor_pwm_ch1;  // PB6
-  pwm_t g_motor_pwm_ch2;  // PB7
-  pwm_t g_motor_pwm_ch3;  // PB8
-  pwm_t g_motor_pwm_ch4;  // PB9
+/*=============================================================================
+ * Keil Watch å¯ä¿®æ”¹å˜é‡ (è°ƒè¯•æ¥å£)
+ *=============================================================================*/
+volatile int   comm_mode        = 0;     /* 0=åœ, 1=å¼€ç¯æ­£è½¬, 2=å¼€ç¯åè½¬, 3=é—­ç¯æ­£è½¬, 4=é—­ç¯åè½¬ */
+volatile float g_comm_duty_pct  = 80.0f; /* å ç©ºæ¯” 2%~98% */
 
-//   /*=============================================================================
-//    * ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-//    *=============================================================================*/
-//   static void Motor_Pwm_Init(void);
+/* æ—§ PWM å…¨å±€å˜é‡ (dev_motor æ¨¡å—å¼•ç”¨, ä¸å¯åˆ é™¤) */
+pwm_t g_motor_pwm_ch1;
+pwm_t g_motor_pwm_ch2;
+pwm_t g_motor_pwm_ch3;
+pwm_t g_motor_pwm_ch4;
 
-//   /*=============================================================================
-//    * ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ãµï¿½PWMï¿½ï¿½4ï¿½ï¿½Í¨ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ§ï¿½ï¿½
-//    *=============================================================================*/
-//   static void Motor_Pwm_Init(void)
-//   {
-//       // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½?4ï¿½ï¿½Í¨ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ§ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªÍ¨ï¿½ï¿½Õ¼ï¿½Õ±È·ï¿½ï¿½ï¿½Êµï¿½Ö£ï¿½
-//       // Æµï¿½Ê£ï¿½20kHzï¿½ï¿½ï¿½ï¿½Ê¼Õ¼ï¿½Õ±È£ï¿½0%
+/*=============================================================================
+ * Hall æ˜ å°„è¡¨ (16å¼  Ã— 8é¡¹)
+ *   0~5: åŒæ­¥ (éœå°”+1=ç£åœºCW)
+ *   6~11: åç§» (éœå°”+1=ç£åœºCCW)
+ *   12: å®æµ‹æ ¡å‡† CW
+ *   13: CCW (ç£åœºCCWè¶…å‰)
+ *   14: å¼ºæ‹–æ­£è½¬ [sector+90Â°]
+ *   15: å¼ºæ‹–åè½¬ [sector-90Â°]
+ *=============================================================================*/
+static const uint8_t hall_tables[16][8] = {
+    /* === åŒæ­¥: éœå°”+1 = ç£åœºCW === */
+    {0xFF, 0, 2, 1, 4, 5, 3, 0xFF},   /*  0: ç£åœºæ­£è½¬(é‡åˆ) */
+    {0xFF, 1, 3, 2, 5, 0, 4, 0xFF},   /*  1: ç£åœºè¶…å‰ 1 æ‹ */
+    {0xFF, 2, 4, 3, 0, 1, 5, 0xFF},   /*  2: ç£åœºè¶…å‰ 2 æ‹ */
+    {0xFF, 3, 5, 4, 1, 2, 0, 0xFF},   /*  3: ç£åœºè¶…å‰ 3 æ‹ */
+    {0xFF, 4, 0, 5, 2, 3, 1, 0xFF},   /*  4: ç£åœºè¶…å‰ 4 æ‹ */
+    {0xFF, 5, 1, 0, 3, 4, 2, 0xFF},   /*  5: ç£åœºè¶…å‰ 5 æ‹ */
+    /* === åç§»: éœå°”+1 = ç£åœºCCW === */
+    {0xFF, 5, 3, 4, 1, 0, 2, 0xFF},   /*  6 */
+    {0xFF, 0, 4, 5, 2, 1, 3, 0xFF},   /*  7 */
+    {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /*  8 */
+    {0xFF, 2, 0, 1, 4, 3, 5, 0xFF},   /*  9 */
+    {0xFF, 3, 1, 2, 5, 4, 0, 0xFF},   /* 10 */
+    {0xFF, 4, 2, 3, 0, 5, 1, 0xFF},   /* 11 */
+    /* === å®æµ‹æ ¡å‡† === */
+    {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /* 12: CW */
+    {0xFF, 2, 0, 1, 3, 5, 4, 0xFF},   /* 13: CCW */
+    /* === å¼ºæ‹–: è¶…å‰/æ»å 90Â° === */
+    {0xFF, 2, 0, 1, 4, 3, 5, 0xFF},   /* 14: å¼ºæ‹–æ­£è½¬ [sector+90Â°] */
+    {0xFF, 5, 3, 4, 1, 0, 2, 0xFF},   /* 15: å¼ºæ‹–åè½¬ [sector-90Â°] */
+};
 
-//       // ï¿½ï¿½ï¿½ï¿½GPIOï¿½ï¿½ï¿½è£¨ï¿½ï¿½ï¿½ï¿½ï¿½Ş¸ï¿½GPIOï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã£ï¿½
-//       LL_PERIPH_WE(LL_PERIPH_GPIO);
+int main(void)
+{
+    /* ---- ç¡¬ä»¶åˆå§‹åŒ– ---- */
+    Hardware_Init();
 
-//       // CH1: PB6 - ï¿½ï¿½ï¿½ï¿½Ğ§
-//       g_motor_pwm_ch1 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH1,
-//                                   GPIO_PORT_B, GPIO_PIN_06, GPIO_FUNC_4,
-//                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
-//                                   6000, 0, PWM_ACTIVE_LOW);
+    /* ---- é€šä¿¡æ ˆ (RS485 + Modbus RTU) ---- */
+    static const App_Comm_Config_t comm_cfg = {
+        .phy.baudrate     = 9600,
+        .phy.dir_polarity = 0,
+        .hal.rx_buf_size  = 500,
+        .hal.tx_buf_size  = 500,
+        .hal.rx_frame_queue_depth = 10,
+        .hal.tx_queue_depth       = 10,
+        .hal.frame_timeout_ms     = 0,
+        .proto.node_id            = 1,
+        .proto.enable_write_multi = true,
+    };
+    App_Comm_Init(&comm_cfg);
 
-//       // CH2: PB7 - ï¿½ï¿½ï¿½ï¿½Ğ§
-//       g_motor_pwm_ch2 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH2,
-//                                   GPIO_PORT_B, GPIO_PIN_07, GPIO_FUNC_4,
-//                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
-//                                   6000, 0, PWM_ACTIVE_LOW);
+    tickTimer_DelayMs(5);
 
-//       // CH3: PB8 - ï¿½ï¿½ï¿½ï¿½Ğ§
-//       g_motor_pwm_ch3 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH3,
-//                                   GPIO_PORT_B, GPIO_PIN_08, GPIO_FUNC_4,
-//                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
-//                                   6000, 0, PWM_ACTIVE_LOW);
+    /* ---- æ¢ç›¸æ§åˆ¶å™¨åˆå§‹åŒ– ---- */
+    static const comm_runner_config_t runner_cfg = {
+        .pwm_freq_hz       = 50000,
+        .hall_tables       = hall_tables,
+        .hall_table_cw     = 14,
+        .hall_table_ccw    = 15,
 
-//       // CH4: PB9 - ï¿½ï¿½ï¿½ï¿½Ğ§
-//       g_motor_pwm_ch4 = PWM_Init(CM_TMRA_4, FCG2_PERIPH_TMRA_4, TMRA_CH4,
-//                                   GPIO_PORT_B, GPIO_PIN_09, GPIO_FUNC_4,
-//                                   TMRA_MD_SAWTOOTH, TMRA_DIR_UP,
-//                                   6000, 0, PWM_ACTIVE_LOW);
+        /* Hall ä¼ æ„Ÿå™¨é…ç½®: 3è·¯, PA10=U, PA9=V, PA8=W, 3å¯¹æ */
+        .hall_cfg = {
+            .port      = {GPIO_PORT_A, GPIO_PORT_A, GPIO_PORT_A},
+            .pin       = {GPIO_PIN_10, GPIO_PIN_09, GPIO_PIN_08},
+            .eirq_ch   = {EXTINT_CH10, EXTINT_CH09, EXTINT_CH08},
+            .irqn      = {INT010_IRQn, INT009_IRQn, INT008_IRQn},
+            .irq_src   = {INT_SRC_PORT_EIRQ10, INT_SRC_PORT_EIRQ9, INT_SRC_PORT_EIRQ8},
+            .irq_priority = DDL_IRQ_PRIO_02,
+            .pole_pairs   = 3,
+            /* é»˜è®¤ç£åœºå¯¹é½è¡¨: step0â†’0x01, ç£åœºæ­£å‘ */
+            .hall_to_step = {0xFF,1,3,2,5,0,4,0xFF},
+            /* on_step/on_fault ç”± CommRunner å†…éƒ¨è¦†å†™ */
+            .on_step      = NULL,
+            .on_fault     = NULL,
+            .align_step        = 0,
+            .align_duty_pct    = 80.0f,
+            .align_duration_ms = 500,
+            .stall_timeout_ms  = 500,
+        },
 
-//       // ï¿½ï¿½ï¿½ï¿½GPIOï¿½ï¿½ï¿½è£¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ãºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?????
-//       LL_PERIPH_WP(LL_PERIPH_GPIO);
+        /* å¼€ç¯æ’é€Ÿ (mode 1/2): 667 RPM å®šé€Ÿ 3s æ–œå¡ */
+        .ol_const_start_us  = 5000,
+        .ol_const_target_us = 5000,
+        .ol_const_ramp_ms   = 3000,
 
-//       // ï¿½ï¿½ï¿½ï¿½FCGï¿½ï¿½ï¿½è£¨Ê¹ï¿½Ü¶ï¿½Ê±ï¿½ï¿½Ê±ï¿½Ó£ï¿½
-//       LL_PERIPH_WE(LL_PERIPH_FCG);
+        /* é£å¯å¼€ç¯ (mode 3/4): 167â†’1111 RPM, 2s æ–œå¡ */
+        .ol_fly_start_us    = 20000,
+        .ol_fly_target_us   = 3000,
+        .ol_fly_ramp_ms     = 2000,
 
-//       // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PWMï¿½ï¿½Ê±ï¿½ï¿½
-//       PWM_Start(&g_motor_pwm_ch1);
-//       PWM_Start(&g_motor_pwm_ch2);
-//       PWM_Start(&g_motor_pwm_ch3);
-//       PWM_Start(&g_motor_pwm_ch4);
+        .default_duty_pct   = 80.0f,
+        .on_init_done       = NULL,
+    };
+    CommRunner_Init(&runner_cfg);
 
-//       // Ê¹ï¿½ï¿½ï¿½ï¿½ï¿?????
-//       PWM_OutputCmd(&g_motor_pwm_ch1, PWM_OUTPUT_ENABLE);
-//       PWM_OutputCmd(&g_motor_pwm_ch2, PWM_OUTPUT_ENABLE);
-//       PWM_OutputCmd(&g_motor_pwm_ch3, PWM_OUTPUT_ENABLE);
-//       PWM_OutputCmd(&g_motor_pwm_ch4, PWM_OUTPUT_ENABLE);
+    EventBus_Enable();
 
-//       // ï¿½ï¿½ï¿½ï¿½FCGï¿½ï¿½ï¿½ï¿½
-//       LL_PERIPH_WP(LL_PERIPH_FCG);
+    /* ---- ä¸»å¾ªç¯ ---- */
+    static int   s_prev_mode     = -1;
+    static float s_prev_duty     = 80.0f;
 
-//       MAIN_D("Motor PWM initialized: 4 channels, 20kHz, low active\r\n");
-//   }
+    while (1) {
+        App_Comm_Poll();
 
-  /*=============================================================================
-   * ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-   *=============================================================================*/
-  volatile int commu_num = 0;
-  volatile int comm_mode = 0;   /* 0=Í£, 1=¿ª»·Õı×ª, 2=¿ª»··´×ª, 3=±Õ»·Õı×ª, 4=±Õ»··´×ª */
-  static int s_prev_mode = 0;
-  static uint64_t s_last_step_time_us = 0;
-  static uint64_t s_ramp_start_time_us = 0;
-  static uint32_t s_current_interval_us = 0;
-  #define COMM_PWM_FREQ_HZ           50000UL
-  volatile float g_comm_duty_pct = 80.0f;  /* Keil Watch ¿É¸Ä, ±Õ»·PWMÕ¼¿Õ±È */
-  /* ¹Ì¶¨»»Ïà¼ä¸ô, ÎŞĞ±ÆÂ */
-  #define RAMP_START_INTERVAL_US   5000UL   /* Æğ²½ ~667 RPM */
-  #define RAMP_TARGET_INTERVAL_US  5000UL   /* Ä¿±ê ~667 RPM */
-  #define RAMP_DURATION_MS         3000UL
+        /* Keil Watch â†’ CommRunner (è°ƒè¯•å™¨/Modbus ä¸‹å‘çš„æ¨¡å¼åˆ‡æ¢) */
+        if (comm_mode != s_prev_mode) {
+            s_prev_mode = comm_mode;
+            CommRunner_SetMode((comm_runner_mode_t)comm_mode);
+        }
+        if (g_comm_duty_pct != s_prev_duty) {
+            s_prev_duty = g_comm_duty_pct;
+            CommRunner_SetDuty(g_comm_duty_pct);
+        }
 
-  /* ¿ª»·Ç¿ÍÏÇĞ±Õ»·²ÎÊı */
-  volatile int comm_sub_phase = 0;        /* 0=¿ª»·Ç¿ÍÏ, 1=±Õ»· */
-  static uint64_t s_ol_ramp_start_us = 0;
-  static uint64_t s_ol_last_step_us = 0;
-  static uint32_t s_ol_current_interval_us = 0;
-  #define OL_START_INTERVAL_US    20000UL  /* Æğ²½ ~167 RPM, µÍËÙ´óÅ¤¾Ø */
-  #define OL_TARGET_INTERVAL_US    3000UL  /* Ä¿±ê ~1111 RPM */
-  #define OL_RAMP_DURATION_MS      2000UL  /* Ç¿ÍÏ 2 Ãë */
+        /* é©±åŠ¨æ¢ç›¸çŠ¶æ€æœº */
+        CommRunner_Update();
 
-  /* ±Õ»· Hall ´«¸ĞÆ÷ */
-  static hall_3ch_handle_t s_hall_handle = NULL;
-
-  /* Hall Ó³Éä±íË÷Òı: Keil Watch ¿É¸Ä, ¸÷Ä£Ê½¶ÀÁ¢ */
-  volatile int hall_table_cw  = 14;  /* mode 3 ±Õ»·Õı×ªÓÃ */
-  volatile int hall_table_ccw = 15;  /* mode 4 ±Õ»··´×ªÓÃ */
-
-  /* 16 ÖÖÓ³Éä: 0~5Í¬Ïò, 6~11·´Ïò, 12¿ª»·Êµ²âĞ£Õı, 13 CCW(´Å³¡³¬Ç°), 14 ÍÆµ¼Õı×ª, 15 ÍÆµ¼·´×ª */
-  static const uint8_t hall_tables[16][8] = {
-      /* === Í¬Ïò: ²½½ø+1 = ´Å³¡CW === */
-      {0xFF, 0, 2, 1, 4, 5, 3, 0xFF},   /*  0: ´Å³¡¸ú×ª×ÓÖØºÏ */
-      {0xFF, 1, 3, 2, 5, 0, 4, 0xFF},   /*  1: ´Å³¡ÁìÏÈ 1 ²½ */
-      {0xFF, 2, 4, 3, 0, 1, 5, 0xFF},   /*  2: ´Å³¡ÁìÏÈ 2 ²½ */
-      {0xFF, 3, 5, 4, 1, 2, 0, 0xFF},   /*  3: ´Å³¡ÁìÏÈ 3 ²½ */
-      {0xFF, 4, 0, 5, 2, 3, 1, 0xFF},   /*  4: ´Å³¡ÁìÏÈ 4 ²½ */
-      {0xFF, 5, 1, 0, 3, 4, 2, 0xFF},   /*  5: ´Å³¡ÁìÏÈ 5 ²½ */
-      /* === ·´Ïò: ²½½ø+1 = ´Å³¡CCW (ÓëHallĞòÁĞCWÏà·´) === */
-      {0xFF, 5, 3, 4, 1, 0, 2, 0xFF},   /*  6: CWÁìÏÈ1 */
-      {0xFF, 0, 4, 5, 2, 1, 3, 0xFF},   /*  7: CWÁìÏÈ2 */
-      {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /*  8: CWÁìÏÈ3 */
-      {0xFF, 2, 0, 1, 4, 3, 5, 0xFF},   /*  9: CWÁìÏÈ4 */
-      {0xFF, 3, 1, 2, 5, 4, 0, 0xFF},   /* 10: CWÁìÏÈ5 */
-      {0xFF, 4, 2, 3, 0, 5, 1, 0xFF},   /* 11: CWÁìÏÈ0(ÖØºÏ) */
-      /* === ¿ª»·Êµ²âĞ£Õı === */
-      {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /* 12: CW¡ústepµİ¼õ [0x03¡ú0,0x02¡ú5,0x06¡ú4,0x04¡ú3,0x05¡ú2,0x01¡ú1] */
-      {0xFF, 2, 0, 1, 3, 5, 4, 0xFF},   /* 13: CCW,´Å³¡CCW³¬Ç° [0x01¡ú2,0x02¡ú0,0x03¡ú1,0x04¡ú3,0x05¡ú5,0x06¡ú4] */
-      /* === ÀíÂÛÍÆµ¼: ÉÈÇø¡À90¡ã ¡ú µçÑ¹Ê¸Á¿ ¡ú step === */
-      {0xFF, 2, 0, 1, 4, 3, 5, 0xFF},   /* 14: ÍÆµ¼Õı×ª [sector+90¡ã, hall¡ústep: 0x01¡ú2,0x02¡ú0,0x03¡ú1,0x04¡ú4,0x05¡ú3,0x06¡ú5] */
-      {0xFF, 5, 3, 4, 1, 0, 2, 0xFF},   /* 15: ÍÆµ¼·´×ª [sector-90¡ã, hall¡ústep: 0x01¡ú5,0x02¡ú3,0x03¡ú4,0x04¡ú1,0x05¡ú0,0x06¡ú2] */
-  };
-
-  /* Hall »Øµ÷: ISR ÄÚµ÷, Ö±½Ó»»Ïà */
-  static void on_hall_step(uint8_t step, hall3_direction_t dir)
-  {
-      (void)dir;
-      Commutation_Step(step, COMM_PWM_FREQ_HZ, g_comm_duty_pct);
-  }
-
-  /* Hall ¹ÊÕÏ»Øµ÷: 000/111 ¡ú ÇĞµ½»¬ĞĞ */
-  static void on_hall_fault(uint8_t hall_state)
-  {
-      (void)hall_state;
-      comm_mode = 0;
-      MAIN_D("[COMM] Hall fault state=0x%02X, coast", hall_state);
-  }
-
-  int main(void)
-  {
-      Hardware_Init();
-
-      /* Í¨ï¿½ï¿½Õ»ï¿½ï¿½Ê¼ï¿½ï¿½ (RS485 + Modbus RTU) */
-      static const App_Comm_Config_t comm_cfg = {
-          .phy.baudrate     = 9600,
-          .phy.dir_polarity = 0,
-          .hal.rx_buf_size  = 500,
-          .hal.tx_buf_size  = 500,
-          .hal.rx_frame_queue_depth = 10,
-          .hal.tx_queue_depth       = 10,
-          .hal.frame_timeout_ms     = 0,
-          .proto.node_id            = 1,
-          .proto.enable_write_multi = true,
-      };
-      App_Comm_Init(&comm_cfg);
-
-    //   ESystem_Init();
-
-      /* ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Äµï¿½Ñ¹/ï¿½ï¿½ï¿½ï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â¹ï¿½ï¿½ï¿½ï¿½ë£© */
-    //   FaultHandler_Init();
-
-      /* ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½PWMï¿½ï¿½ï¿½Úµï¿½ï¿½ï¿½è±¸ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½Ç°ï¿½ï¿½? */
-    //   Motor_Pwm_Init();
-      tickTimer_DelayMs(5);
-      static const tmr4_pwm_config_t pwm_cfg = {
-          .output_type_u = TMR4_OUTPUT_SYNC,
-          .output_type_v = TMR4_OUTPUT_SYNC,
-          .output_type_w = TMR4_OUTPUT_SYNC,
-          .freq_hz       = 50000,
-          .dead_time_ns  = 0,
-          .active_high   = true,
-      };
-      TMR4_PWM_Config(&pwm_cfg);
-
-      MAIN_D("[MAIN] TMR4 Config done, starting output");
-      TMR4_PWM_StartOutput();
-
-      /* ³õÊ¼»¯¶¨Ê±Æ÷, ÓÃÓÚ»»Ïà¼ÆÊ± */
-      Timer6_Timebase_Init();
-      Timer6_Timebase_Start();
-
-      /* Áù²½»»Ïà: ÉÏµçÄ¬ÈÏ»¬ĞĞÌ¬ (ÈıÏà98% SYNC -> ÉÏ¹ÜÈ«Í¨ -> Í¬µçÎ» -> ×ÔÓÉ»¬ĞĞ) */
-      int ch;
-      for (ch = 0; ch < 3; ch++) {
-          TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch, TMR4_MODE_SYNC, 98.0f);
-      }
-
-      /* ³õÊ¼»¯ Hall ´«¸ĞÆ÷ (3Â·±Õ»·) */
-      static const hall_3ch_config_t hall_cfg = {
-          .port      = {GPIO_PORT_A, GPIO_PORT_A, GPIO_PORT_A},
-          .pin       = {GPIO_PIN_10, GPIO_PIN_09, GPIO_PIN_08},  /* U=PA10, V=PA9, W=PA8 */
-          .eirq_ch   = {EXTINT_CH10, EXTINT_CH09, EXTINT_CH08},
-          .irqn      = {INT010_IRQn, INT009_IRQn, INT008_IRQn},
-          .irq_src   = {INT_SRC_PORT_EIRQ10, INT_SRC_PORT_EIRQ9, INT_SRC_PORT_EIRQ8},
-          .irq_priority = DDL_IRQ_PRIO_02,
-          .pole_pairs   = 3,
-          .hall_to_step = {0xFF,1,3,2,5,0,4,0xFF},   /* step0¡ú0x01, ´Å³¡ÁìÏÈ: 0x01¡ú1,0x02¡ú3,0x03¡ú2,0x04¡ú5,0x05¡ú0,0x06¡ú4 */
-          .on_step      = on_hall_step,
-          .on_fault     = on_hall_fault,
-          .align_step        = 0,
-          .align_duty_pct    = 80.0f,
-          .align_duration_ms = 500,
-          .stall_timeout_ms  = 500,
-      };
-      s_hall_handle = hall_3ch_create(&hall_cfg);
-      MAIN_D("[MAIN] Hall sensor created");
-
-      EventBus_Enable();
-
-      while (1) {
-          App_Comm_Poll();
-
-          /* Ä£Ê½ÇĞ»»¼ì²â */
-          if (comm_mode != s_prev_mode) {
-              s_prev_mode = comm_mode;
-
-              if (comm_mode == 0) {
-                  /* »¬ĞĞ */
-                  int ch;
-                  comm_sub_phase = 0;
-                  hall_3ch_stop(s_hall_handle);
-                  for (ch = 0; ch < 3; ch++) {
-                      TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch, TMR4_MODE_SYNC, 98.0f);
-                  }
-                  MAIN_D("[COMM] Mode=0: COAST");
-              } else if (comm_mode == 1 || comm_mode == 2) {
-                  /* ¿ª»·Æô¶¯ */
-                  hall_3ch_stop(s_hall_handle);
-                  commu_num = 0;
-                  s_ramp_start_time_us = Timer6_Timebase_GetTimestamp();
-                  s_current_interval_us = RAMP_START_INTERVAL_US;
-                  s_last_step_time_us = s_ramp_start_time_us;
-                  Commutation_Init();
-                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, g_comm_duty_pct);
-                  MAIN_D("[COMM] Mode=%d: OPEN-LOOP START", comm_mode);
-              } else if (comm_mode == 3) {
-                  /* CW: ¿ª»·Ç¿ÍÏ ¡ú ÇĞ±Õ»· */
-                  hall_3ch_stop(s_hall_handle);
-                  Commutation_Init();
-                  commu_num = 0;
-                  s_ol_ramp_start_us = Timer6_Timebase_GetTimestamp();
-                  s_ol_current_interval_us = OL_START_INTERVAL_US;
-                  s_ol_last_step_us = s_ol_ramp_start_us;
-                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, g_comm_duty_pct);
-                  comm_sub_phase = 0;
-                  MAIN_D("[COMM] Mode=3: Open-loop ramp -> closed-loop (CW)");
-              } else if (comm_mode == 4) {
-                  /* CCW: ¿ª»·Ç¿ÍÏ ¡ú ÇĞ±Õ»· */
-                  hall_3ch_stop(s_hall_handle);
-                  Commutation_Init();
-                  commu_num = 0;
-                  s_ol_ramp_start_us = Timer6_Timebase_GetTimestamp();
-                  s_ol_current_interval_us = OL_START_INTERVAL_US;
-                  s_ol_last_step_us = s_ol_ramp_start_us;
-                  COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, g_comm_duty_pct);
-                  comm_sub_phase = 0;
-                  MAIN_D("[COMM] Mode=4: Open-loop ramp -> closed-loop (CCW)");
-              }
-          }
-
-          /* ¿ª»·ÔËĞĞ: ¶¨Ê±²½½ø */
-          if (comm_mode == 1 || comm_mode == 2) {
-              Timer6_Timebase_UpdateTimestamp();
-              uint64_t now = Timer6_Timebase_GetTimestamp();
-
-              uint64_t ramp_elapsed = now - s_ramp_start_time_us;
-              uint64_t ramp_total = RAMP_DURATION_MS * 1000UL;
-              if (ramp_elapsed < ramp_total) {
-                  s_current_interval_us = RAMP_START_INTERVAL_US
-                      - (uint32_t)((RAMP_START_INTERVAL_US - RAMP_TARGET_INTERVAL_US)
-                                   * ramp_elapsed / ramp_total);
-              } else {
-                  s_current_interval_us = RAMP_TARGET_INTERVAL_US;
-              }
-
-              if ((now - s_last_step_time_us) >= s_current_interval_us) {
-                  s_last_step_time_us = now;
-                  if (comm_mode == 1) {
-                      commu_num = (commu_num + 1) % 6;
-                  } else {
-                      commu_num = (commu_num + 5) % 6;
-                  }
-                  Commutation_Step((uint8_t)commu_num, COMM_PWM_FREQ_HZ, g_comm_duty_pct);
-              }
-          }
-
-          /* Ä£Ê½3/4: ¿ª»·Ç¿ÍÏ ¡ú ·ÉĞĞÆô¶¯ÇĞ±Õ»· */
-          if (comm_mode == 3 || comm_mode == 4) {
-              Timer6_Timebase_UpdateTimestamp();
-              uint64_t now = Timer6_Timebase_GetTimestamp();
-
-              if (comm_sub_phase == 0) {
-                  /* === ½×¶Î0: ¿ª»·Ç¿ÍÏ + Ğ±ÆÂ (OL_START ¡ú OL_TARGET) === */
-                  uint64_t ramp_elapsed = now - s_ol_ramp_start_us;
-                  uint64_t ramp_total = OL_RAMP_DURATION_MS * 1000UL;
-                  if (ramp_elapsed < ramp_total) {
-                      s_ol_current_interval_us = OL_START_INTERVAL_US
-                          - (uint32_t)((OL_START_INTERVAL_US - OL_TARGET_INTERVAL_US)
-                                       * ramp_elapsed / ramp_total);
-                  } else {
-                      s_ol_current_interval_us = OL_TARGET_INTERVAL_US;
-                  }
-
-                  if ((now - s_ol_last_step_us) >= s_ol_current_interval_us) {
-                      s_ol_last_step_us = now;
-                      if (comm_mode == 3) {
-                          commu_num = (commu_num + 1) % 6;
-                      } else {
-                          commu_num = (commu_num + 5) % 6;
-                      }
-                      Commutation_Step((uint8_t)commu_num, COMM_PWM_FREQ_HZ, g_comm_duty_pct);
-                  }
-
-                  /* Ğ±ÆÂÍê³É ¡ú ·ÉĞĞÆô¶¯ÇĞ±Õ»· (¶Á Hall µ±Ç°Î»ÖÃ, Ìø¹ı¶ÔÆë) */
-                  if (ramp_elapsed >= ramp_total) {
-                      if (comm_mode == 3) {
-                          hall_3ch_set_table(s_hall_handle, hall_tables[hall_table_cw]);
-                          hall_3ch_start_flying(s_hall_handle, HALL3_DIR_FORWARD);
-                      } else {
-                          hall_3ch_set_table(s_hall_handle, hall_tables[hall_table_ccw]);
-                          hall_3ch_start_flying(s_hall_handle, HALL3_DIR_REVERSE);
-                      }
-                      comm_sub_phase = 1;
-                      MAIN_D("[COMM] Mode=%d: Flying start -> closed-loop", comm_mode);
-                  }
-
-              } else {
-                  /* === ½×¶Î1: ±Õ»·ÔËĞĞ (Hall ISR Çı¶¯»»Ïà) === */
-                  hall_3ch_update(s_hall_handle);
-                  if (hall_3ch_is_stalled(s_hall_handle)) {
-                      comm_mode = 0;
-                      comm_sub_phase = 0;
-                      MAIN_D("[COMM] Closed-loop stall, coast");
-                  }
-              }
-          }
-      }
-  }
+        /* CommRunner â†’ Keil Watch (å µè½¬ç­‰å†…éƒ¨è§¦å‘çš„ STOP åŒæ­¥å›æ¥) */
+        {
+            int actual = (int)CommRunner_GetMode();
+            if (actual != comm_mode) {
+                comm_mode   = actual;
+                s_prev_mode = actual;
+            }
+        }
+    }
+}

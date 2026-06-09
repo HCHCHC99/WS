@@ -120,7 +120,6 @@
         <SetRegEntry>
           <Number>0</Number>
           <Key>DLGUARM</Key>
-          <Name>貨d6</Name>
         </SetRegEntry>
         <SetRegEntry>
           <Number>0</Number>
@@ -1571,7 +1570,7 @@
 
   <Group>
     <GroupName>Utils</GroupName>
-    <tvExp>1</tvExp>
+    <tvExp>0</tvExp>
     <tvExpOptDlg>0</tvExpOptDlg>
     <cbSel>0</cbSel>
     <RteFlg>0</RteFlg>
@@ -1688,6 +1687,18 @@
       <bDave2>0</bDave2>
       <PathWithFileName>..\..\ws\hall_sensor_3ch.c</PathWithFileName>
       <FilenameWithoutPath>hall_sensor_3ch.c</FilenameWithoutPath>
+      <RteFlg>0</RteFlg>
+      <bShared>0</bShared>
+    </File>
+    <File>
+      <GroupNumber>10</GroupNumber>
+      <FileNumber>92</FileNumber>
+      <FileType>1</FileType>
+      <tvExp>0</tvExp>
+      <tvExpOptDlg>0</tvExpOptDlg>
+      <bDave2>0</bDave2>
+      <PathWithFileName>..\..\ws\dev_comm_runner.c</PathWithFileName>
+      <FilenameWithoutPath>dev_comm_runner.c</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>
     </File>

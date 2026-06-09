@@ -883,6 +883,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\ws\hall_sensor_3ch.c</FilePath>
             </File>
+            <File>
+              <FileName>dev_comm_runner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ws\dev_comm_runner.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>
@@ -1763,6 +1768,11 @@
               <FileName>hall_sensor_3ch.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\ws\hall_sensor_3ch.c</FilePath>
+            </File>
+            <File>
+              <FileName>dev_comm_runner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ws\dev_comm_runner.c</FilePath>
             </File>
           </Files>
         </Group>

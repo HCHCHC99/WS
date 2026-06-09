@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* ========== ³£Á¿ ========== */
+/* ========== ï¿½ï¿½ï¿½ï¿½ ========== */
 #define MAX_INSTANCES             2
 #define MIN_PULSE_INTERVAL_US     50u
 #define MAX_PULSE_INTERVAL_US     200000u
@@ -15,7 +15,7 @@
 #define DIR_CONFIRM_COUNT         3
 #define HALL_STATE_MASK           0x07u
 
-/* ========== ×´Ì¬»ú ========== */
+/* ========== ×´Ì¬ï¿½ï¿½ ========== */
 enum {
     STATE_IDLE = 0,
     STATE_ALIGNING,
@@ -23,7 +23,7 @@ enum {
     STATE_FAULT,
 };
 
-/* ========== ÊµÀıÄÚ²¿½á¹¹ ========== */
+/* ========== Êµï¿½ï¿½ï¿½Ú²ï¿½ï¿½á¹¹ ========== */
 typedef struct hall_3ch_instance_t {
     uint8_t id;
     uint8_t valid;
@@ -31,11 +31,11 @@ typedef struct hall_3ch_instance_t {
 
     hall_3ch_config_t config;
 
-    /* ±£´æ gpio ÒıÓÃÓÃÓÚ ISR ÄÚ¶ÁµçÆ½ */
+    /* ï¿½ï¿½ï¿½ï¿½ gpio ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ISR ï¿½Ú¶ï¿½ï¿½ï¿½Æ½ */
     uint8_t  gpio_port[3];
     uint16_t gpio_pin[3];
 
-    /* ISR Ğ´Èë, update ¶ÁÈ¡ */
+    /* ISR Ğ´ï¿½ï¿½, update ï¿½ï¿½È¡ */
     volatile uint8_t  last_hall_state;
     volatile uint8_t  last_valid_state;
     volatile uint8_t  last_step;
@@ -43,7 +43,7 @@ typedef struct hall_3ch_instance_t {
     volatile uint64_t last_pulse_time_us;
     volatile uint32_t pulse_counter;
 
-    /* ·½Ïò */
+    /* ï¿½ï¿½ï¿½ï¿½ */
     volatile hall3_direction_t current_dir;
     volatile uint8_t  dir_confirm_count;
     volatile uint8_t  dir_data_ready;
@@ -55,28 +55,28 @@ typedef struct hall_3ch_instance_t {
     uint8_t           rpm_write_idx;
     uint8_t           rpm_valid_count;
 
-    uint32_t          interval_history[6];
-    uint8_t           interval_idx;
-    uint8_t           interval_valid_count;
-    volatile uint32_t last_pulse_id;   /* È¥ÖØ: ÉÏ´Î¼ÓÈë´°¿ÚµÄ pulse_counter */
+    /* M-method RPM: ï¿½Ì¶ï¿½Ê±ï¿½ä´°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Û¼ï¿½ + ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
+    volatile uint32_t last_pulse_count;
+    uint32_t          rpm_accum_pulses;
+    uint64_t          last_rpm_update_us;
 
-    /* ¶ÔÆëÆô¶¯ */
+    /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
     hall3_direction_t  target_dir;
     uint64_t           align_start_time_us;
 
-    /* ¶Â×ª */
+    /* ï¿½ï¿½×ª */
     volatile uint8_t  stalled;
 
 } hall_3ch_instance_t;
 
-/* ========== È«¾ÖÊµÀı³Ø ========== */
+/* ========== È«ï¿½ï¿½Êµï¿½ï¿½ï¿½ï¿½ ========== */
 static uint8_t g_system_initialized = 0;
 static hall_3ch_instance_t g_instances[MAX_INSTANCES] = {{{0}}};
 
-/* ISR ¿ìËÙË÷Òı: eirq_ch ¡ú ÊµÀıÖ¸Õë */
+/* ISR ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: eirq_ch ï¿½ï¿½ Êµï¿½ï¿½Ö¸ï¿½ï¿½ */
 static hall_3ch_instance_t *g_irq_map[3] = {NULL, NULL, NULL};
 
-/* Keil Watch µ÷ÊÔ±äÁ¿ (·Ç static, volatile) */
+/* Keil Watch ï¿½ï¿½ï¿½Ô±ï¿½ï¿½ï¿½ (ï¿½ï¿½ static, volatile) */
 volatile float    g_hall_rpm        = 0.0f;
 volatile uint8_t  g_hall_state      = 0;
 volatile uint8_t  g_hall_dir        = 0;
@@ -84,10 +84,10 @@ volatile uint8_t  g_hall_running    = 0;
 volatile uint8_t  g_hall_stalled    = 0;
 volatile uint8_t  g_hall_last_step  = 0;
 
-/* ========== ÄÚ²¿ÉùÃ÷ ========== */
+/* ========== ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½ ========== */
 static void hall_common_handler(uint8_t ch);
 
-/* ========== ÏµÍ³³õÊ¼»¯ ========== */
+/* ========== ÏµÍ³ï¿½ï¿½Ê¼ï¿½ï¿½ ========== */
 void hall_3ch_system_init(void)
 {
     if (g_system_initialized) return;
@@ -97,7 +97,7 @@ void hall_3ch_system_init(void)
     g_system_initialized = 1;
 }
 
-/* ========== ×¢²áµ¥Â·ÖĞ¶Ï (EXTINT + GPIO + IRQ, Ò»²½Íê³É) ========== */
+/* ========== ×¢ï¿½áµ¥Â·ï¿½Ğ¶ï¿½ (EXTINT + GPIO + IRQ, Ò»ï¿½ï¿½ï¿½ï¿½ï¿½) ========== */
 static void register_hall_irq(hall_3ch_instance_t *inst, uint8_t ch, func_ptr_t cb)
 {
     stc_extint_init_t       stcExti;
@@ -112,14 +112,14 @@ static void register_hall_irq(hall_3ch_instance_t *inst, uint8_t ch, func_ptr_t 
 
     g_irq_map[ch] = inst;
 
-    /* EXTINT: Ë«±ßÑØ, Ó²¼şÂË²¨ (PCLK1/64¡Ö1.56MHz, ÂË³ı<~10¦Ìs Ã«´Ì) */
+    /* EXTINT: Ë«ï¿½ï¿½ï¿½ï¿½, Ó²ï¿½ï¿½ï¿½Ë²ï¿½ (PCLK1/64ï¿½ï¿½1.56MHz, ï¿½Ë³ï¿½<~10ï¿½ï¿½s Ã«ï¿½ï¿½) */
     memset(&stcExti, 0, sizeof(stcExti));
     stcExti.u32Edge        = EXTINT_TRIG_BOTH;
     stcExti.u32Filter      = EXTINT_FILTER_ON;
     stcExti.u32FilterClock = EXTINT_FCLK_DIV64;
     EXTINT_Init(eirq_ch, &stcExti);
 
-    /* GPIO: Êı×ÖÊäÈë, ÉÏÀ­ */
+    /* GPIO: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ */
     GPIO_StructInit(&stcGpio);
     stcGpio.u16PinDir  = PIN_DIR_IN;
     stcGpio.u16PinAttr = PIN_ATTR_DIGITAL;
@@ -129,7 +129,7 @@ static void register_hall_irq(hall_3ch_instance_t *inst, uint8_t ch, func_ptr_t 
     GPIO_ExtIntCmd(port, pin, ENABLE);
     LL_PERIPH_WP(LL_PERIPH_GPIO);
 
-    /* ÖĞ¶Ï×¢²á (´ø»Øµ÷) */
+    /* ï¿½Ğ¶ï¿½×¢ï¿½ï¿½ (ï¿½ï¿½ï¿½Øµï¿½) */
     memset(&stcIrq, 0, sizeof(stcIrq));
     stcIrq.enIntSrc    = (en_int_src_t)irq_src;
     stcIrq.enIRQn      = irqn;
@@ -142,43 +142,54 @@ static void register_hall_irq(hall_3ch_instance_t *inst, uint8_t ch, func_ptr_t 
     NVIC_EnableIRQ(irqn);
 }
 
-/* ========== ISR Èë¿Ú ========== */
+/* ========== ISR ï¿½ï¿½ï¿½ ========== */
 static void hall_u_isr(void) { hall_common_handler(0); }
 static void hall_v_isr(void) { hall_common_handler(1); }
 static void hall_w_isr(void) { hall_common_handler(2); }
 
-/* ========== ¹²ÓÃµÄ Hall ´¦Àí ========== */
+/* ========== ï¿½ï¿½ï¿½Ãµï¿½ Hall ï¿½ï¿½ï¿½ï¿½ ========== */
+
+/* ï¿½ï¿½ï¿½Ğ¶ï¿½Â· Hall GPIO Æ´ï¿½ï¿½ 3bit ×´Ì¬ï¿½ï¿½ */
+static uint8_t read_hall_state_raw(const hall_3ch_instance_t *inst)
+{
+    uint8_t s = 0;
+    s |= (GPIO_ReadInputPins(inst->gpio_port[0], inst->gpio_pin[0]) == PIN_SET) ? 0x04u : 0x00u;
+    s |= (GPIO_ReadInputPins(inst->gpio_port[1], inst->gpio_pin[1]) == PIN_SET) ? 0x02u : 0x00u;
+    s |= (GPIO_ReadInputPins(inst->gpio_port[2], inst->gpio_pin[2]) == PIN_SET) ? 0x01u : 0x00u;
+    return s;
+}
+
 static void hall_common_handler(uint8_t ch)
 {
     hall_3ch_instance_t *inst = g_irq_map[ch];
     if (!inst || !inst->valid) return;
 
-    /* Çå¸ÃÂ·ÖĞ¶Ï±êÖ¾ */
+    /* ï¿½ï¿½ï¿½Â·ï¿½Ğ¶Ï±ï¿½Ö¾ */
     EXTINT_ClearExtIntStatus(inst->config.eirq_ch[ch]);
 
-    /* ¶ÁÈıÂ· GPIO µçÆ½, Æ´×´Ì¬Âë */
-    uint8_t state = 0;
-    state |= (GPIO_ReadInputPins(inst->gpio_port[0], inst->gpio_pin[0]) == PIN_SET) ? 0x04u : 0x00u;
-    state |= (GPIO_ReadInputPins(inst->gpio_port[1], inst->gpio_pin[1]) == PIN_SET) ? 0x02u : 0x00u;
-    state |= (GPIO_ReadInputPins(inst->gpio_port[2], inst->gpio_pin[2]) == PIN_SET) ? 0x01u : 0x00u;
+    /*
+     * ï¿½ï¿½ï¿½ï¿½ 1: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ GPIO, ï¿½Ë³ï¿½ PWM ï¿½ï¿½ï¿½Ø±ï¿½Ôµï¿½ï¿½
+     *   ï¿½ï¿½ï¿½Î²ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ëµï¿½ï¿½ï¿½Ç¶ï¿½ï¿½ï¿½Ã«ï¿½ï¿½, Ö±ï¿½Ó¶ï¿½ï¿½ï¿½.
+     *   GetDelta() ï¿½Ú´Ë»ï¿½Î´ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È»Ö¸ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ÎºÏ·ï¿½ï¿½ï¿½ï¿½ä¡£
+     */
+    uint8_t state = read_hall_state_raw(inst);
+    for (volatile int32_t _d = 0; _d < 100; _d++) { __NOP(); }  /* ~0.5us */
+    uint8_t state2 = read_hall_state_raw(inst);
+    if (state != state2) {
+        return;
+    }
 
-    /* È¥ÖØ1: ×´Ì¬Ã»±ä ¡ú ¶¶¶¯ */
+    /*
+     * ï¿½ï¿½ï¿½ï¿½ 2: ×´Ì¬Î´ï¿½ï¿½ â†’ Ã«ï¿½ï¿½ (ï¿½ï¿½ï¿½Ø¸ï¿½Í¬Ò»Ã«ï¿½ï¿½)
+     */
     if (state == inst->last_hall_state) {
         return;
     }
 
-    /* È¥ÖØ2: ¼ä¸ôÌ«¶Ì ¡ú µçÆø¶¶¶¯, ²»¸üĞÂ last_hall_state */
-    uint32_t interval = Timer6_Timebase_GetDelta();
-    uint32_t interval_us = Timer6_Timebase_DeltaToUs(interval);
-    if (interval_us < MIN_PULSE_INTERVAL_US) {
-        return;
-    }
-    inst->last_hall_state = state;
-
-    /* ²é±í */
+    /*
+     * ï¿½ï¿½ï¿½ï¿½ 3: ï¿½ï¿½ï¿½×´Ì¬ 000/111 â†’ ï¿½ï¿½ï¿½Ï»ï¿½ï¿½ï¿½ï¿½ï¿½
+     */
     uint8_t step = inst->config.hall_to_step[state];
-
-    /* ¹ÊÕÏ×´Ì¬ 000/111 */
     if (step == 0xFFu) {
         if (inst->state == STATE_RUNNING) {
             inst->state = STATE_FAULT;
@@ -189,8 +200,11 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* ·Ç RUNNING ×´Ì¬: Ö»¸üĞÂÊ±¼ä´Á(·ÀÖ¹¶ÔÆëÍê³ÉºóÁ¢¼´Îó±¨¶Â×ª), ²»¼ÇÂ¼¼ä¸ôÒ²²»»»Ïà */
+    /*
+     * ï¿½ï¿½ RUNNING: Ö»ï¿½ï¿½Ê±ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ last_hall_state ï¿½ï¿½Ö¹ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½ï¿½
+     */
     if (inst->state != STATE_RUNNING) {
+        inst->last_hall_state = state;
         inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
         MAIN_D("[HALL] ch=%d raw=0x%02X -> step=%d (%s)",
                ch, state, step,
@@ -198,7 +212,11 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* RUNNING ×´Ì¬: ÏÈÅĞÏò, Ö»ÓĞºÏ·¨Ìø±ä²Å¼ÇÂ¼¼ä¸ô */
+    /*
+     * ï¿½ï¿½ï¿½ï¿½ 4: ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½ â€” ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (diff=1) ï¿½ï¿½ï¿½ï¿½ï¿½ (diff=5) ï¿½ï¿½ï¿½ÇºÏ·ï¿½ï¿½ï¿½ï¿½ï¿½
+     *   ï¿½Ç·ï¿½ï¿½ï¿½Ô¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ last_step, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ GetDelta() Î´ï¿½ï¿½ï¿½ï¿½,
+     *   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È»Ö¸ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ÎºÏ·ï¿½ï¿½ï¿½ï¿½ä¡£
+     */
     hall3_direction_t tentative;
     int8_t diff = (int8_t)step - (int8_t)inst->last_step;
     if (diff < 0) diff += 6;
@@ -207,18 +225,33 @@ static void hall_common_handler(uint8_t ch)
     } else if (diff == 5) {
         tentative = HALL3_DIR_REVERSE;
     } else {
-        /* ÂÒĞòÌø×ª (Õñ¶¯/¸ÉÈÅ), ¸üĞÂ last_step ·ÀÖ¹Á¬ËøÎóÅĞ, µ«²»¼ÇÂ¼¼ä¸ôÒ²²»»»Ïà */
-        inst->last_step = step;
-        return;
+        return;  /* PWM Ã«ï¿½ï¿½: ï¿½ï¿½ï¿½Ï·ï¿½ï¿½ï¿½Ô¾, ï¿½ï¿½ï¿½ò¶ª¹ï¿½ */
     }
-    inst->last_step = step;
 
-    /* ºÏ·¨Ìø±ä: ¼ÇÂ¼¼ä¸ôºÍÊ±¼ä´Á */
+    /*
+     * ============================================================
+     * ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½È«ï¿½ï¿½ï¿½á¹¹Ğ£ï¿½ï¿½, ï¿½Ë´ï¿½ï¿½Å¿ï¿½Ê¼ï¿½ï¿½Ê±.
+     * GetDelta() ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ÎºÏ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±, ï¿½ï¿½ï¿½ PWM Ã«ï¿½ï¿½Ã»ï¿½Ğ¸ï¿½ï¿½Å¹ï¿½.
+     * ============================================================
+     */
+    uint32_t interval = Timer6_Timebase_GetDelta();
+    uint32_t interval_us = Timer6_Timebase_DeltaToUs(interval);
+    if (interval_us < MIN_PULSE_INTERVAL_US) {
+        return;  /* ï¿½ï¿½ï¿½Ì«ï¿½ï¿½ (Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï·ï¿½×ªï¿½ï¿½) */
+    }
+
+    /*
+     * ï¿½Ï·ï¿½×ªï¿½ï¿½: ï¿½ï¿½ï¿½Â¼ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½
+     */
+    inst->last_hall_state = state;
+    inst->last_step        = step;
+
+    /* ï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ */
     inst->last_pulse_interval_us = interval_us;
     inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
     inst->pulse_counter++;
 
-    /* ·½ÏòÈ·ÈÏ (ĞèÁ¬Ğø¶à´ÎÍ¬Ïò) */
+    /* ï¿½ï¿½ï¿½ï¿½È·ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½) */
     if (tentative != inst->current_dir) {
         inst->dir_confirm_count++;
         if (inst->dir_confirm_count >= DIR_CONFIRM_COUNT) {
@@ -229,7 +262,7 @@ static void hall_common_handler(uint8_t ch)
         inst->dir_confirm_count = 0;
     }
 
-    /* »»Ïà»Øµ÷ */
+    /* ï¿½ï¿½ï¿½à²½ï¿½Øµï¿½ */
     if (inst->config.on_step) {
         MAIN_D("[HALL] ch=%d raw=0x%02X -> step=%d dir=%d",
                ch, state, step, (int)inst->current_dir);
@@ -238,7 +271,7 @@ static void hall_common_handler(uint8_t ch)
 }
 
 
-/* ========== RPM ÂË²¨ ========== */
+/* ========== RPM ï¿½Ë²ï¿½ ========== */
 static void update_rpm_filter(hall_3ch_instance_t *inst, float raw)
 {
     inst->rpm_window[inst->rpm_write_idx] = raw;
@@ -253,64 +286,20 @@ static void update_rpm_filter(hall_3ch_instance_t *inst, float raw)
     inst->filtered_rpm = sum / (float)inst->rpm_valid_count;
 }
 
-/* ========== Æ½¾ù¼ä¸ô ========== */
-static float average_interval_us(hall_3ch_instance_t *inst)
+/* ========== M-method RPM ï¿½ï¿½ï¿½ï¿½ (ï¿½Ì¶ï¿½Ê±ï¿½ä´°ï¿½ï¿½ + ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½) ========== */
+#define RPM_UPDATE_MIN_US      20000u   /* ï¿½ï¿½ï¿½ 20ms ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ */
+#define RPM_UPDATE_MIN_PULSES  6u       /* ï¿½ï¿½ï¿½ 6 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (1 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½) */
+#define RPM_TIMEOUT_US         500000u  /* 500ms è¶…æ—¶: >0 è„‰å†²å¼ºåˆ¶æ›´æ–°, =0 å½’é›¶ */
+
+static float calc_rpm_from_pulses(uint32_t pulses, uint64_t dt_us, uint8_t pole_pairs)
 {
-    uint32_t interval_us = inst->last_pulse_interval_us;
-    uint32_t pulse_id    = inst->pulse_counter;
-
-    /* È¥ÖØ: Í¬Ò»¸öÂö³å²»ÖØ¸´¼ÓÈë´°¿Ú */
-    if (pulse_id == inst->last_pulse_id) {
-        goto calc;
-    }
-
-    /* ·¶Î§¼ì²é */
-    if (interval_us < MIN_PULSE_INTERVAL_US || interval_us > MAX_PULSE_INTERVAL_US) {
-        goto calc;
-    }
-
-    /* ÀëÈºÖµ rejection: Èç¹ûµ±Ç°´°¿ÚÒÑÓĞ×ã¹»Ñù±¾, ¾Ü¾øÆ«Àë¾ùÖµ 4x ÒÔÉÏµÄÖµ
-     * (µç»ú¹ßĞÔ²»¿ÉÄÜÔÚÏàÁÚÁ½´Î»»Ïà¼äË²Ê±¼ÓËÙ/¼õËÙ³¬¹ı 4 ±¶) */
-    if (inst->interval_valid_count >= 3) {
-        uint32_t sum_check = 0;
-        for (uint8_t i = 0; i < inst->interval_valid_count; i++) {
-            sum_check += inst->interval_history[i];
-        }
-        float avg = (float)sum_check / (float)inst->interval_valid_count;
-        if ((float)interval_us < avg * 0.25f || (float)interval_us > avg * 4.0f) {
-            goto calc;  /* ÀëÈºÖµ, ¶ªÆú²»¼ÓÈë´°¿Ú */
-        }
-    }
-
-    /* ¼ÓÈë»¬¶¯´°¿Ú */
-    inst->interval_history[inst->interval_idx] = interval_us;
-    inst->interval_idx = (inst->interval_idx + 1) % 6;
-    if (inst->interval_valid_count < 6) {
-        inst->interval_valid_count++;
-    }
-    inst->last_pulse_id = pulse_id;
-
-calc:
-    if (inst->interval_valid_count < 2) return 0.0f;
-
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < inst->interval_valid_count; i++) {
-        sum += inst->interval_history[i];
-    }
-    return (float)sum / (float)inst->interval_valid_count;
-}
-
-/* ========== ¼ä¸ô ¡ú RPM ========== */
-static float interval_to_rpm(hall_3ch_instance_t *inst, float interval_us)
-{
-    if (interval_us < 1.0f) return 0.0f;
-    uint16_t pulses_per_rev = inst->config.pole_pairs * 6u;
-    float rpm = 60000000.0f / (interval_us * (float)pulses_per_rev);
+    if (dt_us == 0 || pole_pairs == 0) return 0.0f;
+    float rpm = (float)pulses * 60000000.0f / ((float)dt_us * (float)(pole_pairs * 6u));
     if (rpm > 100000.0f) rpm = 100000.0f;
     return rpm;
 }
 
-/* ========== ¹«¿ª½Ó¿Ú ========== */
+/* ========== ï¿½ï¿½ï¿½ï¿½ï¿½Ó¿ï¿½ ========== */
 
 hall_3ch_handle_t hall_3ch_create(const hall_3ch_config_t *cfg)
 {
@@ -330,10 +319,10 @@ hall_3ch_handle_t hall_3ch_create(const hall_3ch_config_t *cfg)
     inst->valid = 1;
     inst->state = STATE_IDLE;
 
-    /* ¿½±´ÅäÖÃ */
+    /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
     memcpy(&inst->config, cfg, sizeof(hall_3ch_config_t));
 
-    /* ±£´æ gpio ÒıÓÃ */
+    /* ï¿½ï¿½ï¿½ï¿½ gpio ï¿½ï¿½ï¿½ï¿½ */
     for (uint8_t ch = 0; ch < 3; ch++) {
         inst->gpio_port[ch] = cfg->port[ch];
         inst->gpio_pin[ch]  = cfg->pin[ch];
@@ -342,7 +331,7 @@ hall_3ch_handle_t hall_3ch_create(const hall_3ch_config_t *cfg)
     inst->last_hall_state = 0xFFu;
     inst->current_dir     = HALL3_DIR_NONE;
 
-    /* ×¢²áÈıÂ·ÖĞ¶Ï */
+    /* ×¢ï¿½ï¿½ï¿½ï¿½Â·ï¿½Ğ¶ï¿½ */
     register_hall_irq(inst, 0, (func_ptr_t)hall_u_isr);
     register_hall_irq(inst, 1, (func_ptr_t)hall_v_isr);
     register_hall_irq(inst, 2, (func_ptr_t)hall_w_isr);
@@ -370,10 +359,16 @@ void hall_3ch_start(hall_3ch_handle_t h, hall3_direction_t dir)
     inst->target_dir  = dir;
     inst->stalled     = 0;
 
-    /* ³õÊ¼»¯Âö³åÊ±¼ä´Á£¬·ÀÖ¹ stall ¼ì²â´ÓÊ±¼äÁãµãÆğËãµ¼ÖÂÎó±¨ */
+    /* ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¹ stall ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ãµ¼ï¿½ï¿½ï¿½ï¿½ */
     inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
 
-    /* ¶ÔÆë: ¸ø align_step Í¨µç */
+    /* M-method RPM: ï¿½ï¿½ï¿½Â´ï¿½ï¿½ï¿½ */
+    Timer6_Timebase_UpdateTimestamp();
+    inst->last_pulse_count   = inst->pulse_counter;
+    inst->rpm_accum_pulses   = 0;
+    inst->last_rpm_update_us = Timer6_Timebase_GetTimestamp();
+
+    /* ï¿½ï¿½ï¿½ï¿½: ï¿½ï¿½ align_step Í¨ï¿½ï¿½ */
     inst->state = STATE_ALIGNING;
     inst->align_start_time_us = inst->last_pulse_time_us;
 
@@ -395,15 +390,23 @@ void hall_3ch_start_flying(hall_3ch_handle_t h, hall3_direction_t dir)
     inst->stalled     = 0;
     inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
 
-    /* ¶Áµ±Ç° Hall ×´Ì¬, ²é±íµÃµ½µ±Ç°»»Ïà²½, Ìø¹ı¶ÔÆëÖ±½Ó½øÈë RUNNING */
-    uint8_t hall_state = 0;
-    hall_state |= (GPIO_ReadInputPins(inst->gpio_port[0], inst->gpio_pin[0]) == PIN_SET) ? 0x04u : 0x00u;
-    hall_state |= (GPIO_ReadInputPins(inst->gpio_port[1], inst->gpio_pin[1]) == PIN_SET) ? 0x02u : 0x00u;
-    hall_state |= (GPIO_ReadInputPins(inst->gpio_port[2], inst->gpio_pin[2]) == PIN_SET) ? 0x01u : 0x00u;
+    /* M-method RPM: ï¿½ï¿½ï¿½Â´ï¿½ï¿½ï¿½ */
+    inst->last_pulse_count   = inst->pulse_counter;
+    inst->rpm_accum_pulses   = 0;
+    inst->last_rpm_update_us = inst->last_pulse_time_us;
+
+    /* è¯»å–å½“å‰ Hall ä½ç½®: åŒé‡‡æ ·ç¡®è®¤ (å¤ç”¨ ISR çš„ read_hall_state_raw) */
+    uint8_t hall_state = read_hall_state_raw(inst);
+    for (volatile int32_t _d = 0; _d < 100; _d++) { __NOP(); }
+    uint8_t hall_state2 = read_hall_state_raw(inst);
+
+    if (hall_state != hall_state2) {
+        hall_state = 0;  /* æ¯›åˆº, fallback åˆ° 000 */
+    }
 
     uint8_t step = inst->config.hall_to_step[hall_state];
     if (step == 0xFFu) {
-        step = 0;  /* 000/111 Òì³£, fallback µ½ step 0 */
+        step = 0;  /* 000/111 ï¿½ì³£, fallback ï¿½ï¿½ step 0 */
     }
 
     inst->state           = STATE_RUNNING;
@@ -425,6 +428,13 @@ void hall_3ch_stop(hall_3ch_handle_t h)
     inst->state    = STATE_IDLE;
     inst->stalled  = 0;
     inst->last_hall_state = 0xFFu;
+
+    /* M-method & RPM filter reset */
+    inst->rpm_accum_pulses   = 0;
+    inst->last_rpm_update_us = 0;
+    inst->current_rpm        = 0.0f;
+    inst->filtered_rpm       = 0.0f;
+    inst->rpm_valid_count    = 0;
 }
 
 void hall_3ch_set_table(hall_3ch_handle_t h, const uint8_t table[8])
@@ -437,7 +447,7 @@ void hall_3ch_set_table(hall_3ch_handle_t h, const uint8_t table[8])
     }
 }
 
-/* ========== ¶¨Ê±ÂÖÑ¯ ========== */
+/* ========== ï¿½ï¿½Ê±ï¿½ï¿½Ñ¯ ========== */
 void hall_3ch_update(hall_3ch_handle_t h)
 {
     if (!h) return;
@@ -452,9 +462,14 @@ void hall_3ch_update(hall_3ch_handle_t h)
     case STATE_ALIGNING: {
         uint64_t elapsed = now - inst->align_start_time_us;
         if (elapsed >= (uint64_t)inst->config.align_duration_ms * 1000UL) {
-            /* ¶ÔÆëÍê³É: ÌßÒ»½Å */
+            /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: ï¿½ï¿½Ò»ï¿½ï¿½ */
             inst->state = STATE_RUNNING;
             inst->last_step = inst->config.align_step;
+
+            /* M-method RPM: ï¿½Ğ»ï¿½ï¿½ï¿½ RUNNING Ê±ï¿½ï¿½ï¿½Â»ï¿½×¼ */
+            inst->last_pulse_count = inst->pulse_counter;
+            inst->rpm_accum_pulses = 0;
+            inst->last_rpm_update_us = now;
 
             uint8_t kick_step;
             if (inst->target_dir == HALL3_DIR_FORWARD) {
@@ -472,15 +487,36 @@ void hall_3ch_update(hall_3ch_handle_t h)
     }
 
     case STATE_RUNNING: {
-        /* RPM */
-        float avg = average_interval_us(inst);
-        if (avg > 0.0f) {
-            float raw = interval_to_rpm(inst, avg);
-            inst->current_rpm = raw;
-            update_rpm_filter(inst, raw);
+        /*
+         * M-method RPM: ï¿½Ì¶ï¿½Ê±ï¿½ä´°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ pulse_counter ï¿½ï¿½ï¿½ï¿½
+         *  ï¿½ï¿½ï¿½ T-method (Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½), M-method ï¿½ï¿½È»Æ½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ä´°ï¿½Úµï¿½Ã«ï¿½ï¿½,
+         *  ï¿½ï¿½ï¿½Ò²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ pulse ï¿½ï¿½ï¿½ timebase ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+         */
+        {
+            uint32_t delta = inst->pulse_counter - inst->last_pulse_count;
+            inst->last_pulse_count = inst->pulse_counter;
+            inst->rpm_accum_pulses += delta;
+
+            uint64_t elapsed = now - inst->last_rpm_update_us;
+            if ((elapsed >= RPM_UPDATE_MIN_US && inst->rpm_accum_pulses >= RPM_UPDATE_MIN_PULSES) ||
+                (elapsed >= RPM_TIMEOUT_US && inst->rpm_accum_pulses > 0)) {
+                /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (>=6 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½) ï¿½ï¿½ï¿½Ê±Ç¿ï¿½Æ¸ï¿½ï¿½ï¿½ (>0 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½) */
+                float raw = calc_rpm_from_pulses(inst->rpm_accum_pulses, elapsed,
+                                                 inst->config.pole_pairs);
+                inst->current_rpm = raw;
+                update_rpm_filter(inst, raw);
+                inst->rpm_accum_pulses = 0;
+                inst->last_rpm_update_us = now;
+            } else if (elapsed > RPM_TIMEOUT_US && inst->rpm_accum_pulses == 0) {
+                /* 500ms ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ -> Í£×ª */
+                inst->current_rpm = 0.0f;
+                update_rpm_filter(inst, 0.0f);
+                inst->rpm_accum_pulses = 0;
+                inst->last_rpm_update_us = now;
+            }
         }
 
-        /* ¶Â×ª¼ì²â */
+        /* ï¿½ï¿½×ªï¿½ï¿½ï¿½ */
         if (inst->config.stall_timeout_ms > 0) {
             uint64_t since_pulse = now - inst->last_pulse_time_us;
             if (since_pulse > (uint64_t)inst->config.stall_timeout_ms * 1000UL) {
@@ -498,7 +534,7 @@ void hall_3ch_update(hall_3ch_handle_t h)
         break;
     }
 
-    /* Í¬²½µ½ Keil Watch µ÷ÊÔ±äÁ¿ */
+    /* Í¬ï¿½ï¿½ï¿½ï¿½ Keil Watch ï¿½ï¿½ï¿½Ô±ï¿½ï¿½ï¿½ */
     g_hall_rpm       = inst->filtered_rpm;
     g_hall_state     = inst->state;
     g_hall_dir       = (uint8_t)inst->current_dir;
@@ -507,7 +543,7 @@ void hall_3ch_update(hall_3ch_handle_t h)
     g_hall_last_step = inst->last_step;
 }
 
-/* ========== ²éÑ¯½Ó¿Ú ========== */
+/* ========== ï¿½ï¿½Ñ¯ï¿½Ó¿ï¿½ ========== */
 
 float hall_3ch_get_rpm(hall_3ch_handle_t h)
 {
