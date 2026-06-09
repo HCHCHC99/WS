@@ -110,11 +110,11 @@
   /* 闭环 Hall 传感器 */
   static hall_3ch_handle_t s_hall_handle = NULL;
 
-  /* 映射表索引: 0~12, Keil Watch 里改, 无需重新编译 */
-  volatile int hall_table_index = 12;
+  /* 映射表索引: 0~15, Keil Watch 里改, 无需重新编译 */
+  volatile int hall_table_index = 14;
 
-  /* 13 种映射: 0~5同向, 6~11反向, 12开环实测校正 */
-  static const uint8_t hall_tables[14][8] = {
+  /* 16 种映射: 0~5同向, 6~11反向, 12开环实测校正, 13 CCW(磁场超前), 14 推导正转, 15 推导反转 */
+  static const uint8_t hall_tables[16][8] = {
       /* === 同向: 步进+1 = 磁场CW === */
       {0xFF, 0, 2, 1, 4, 5, 3, 0xFF},   /*  0: 磁场跟转子重合 */
       {0xFF, 1, 3, 2, 5, 0, 4, 0xFF},   /*  1: 磁场领先 1 步 */
@@ -132,6 +132,9 @@
       /* === 开环实测校正 === */
       {0xFF, 1, 5, 0, 3, 2, 4, 0xFF},   /* 12: CW→step递减 [0x03→0,0x02→5,0x06→4,0x04→3,0x05→2,0x01→1] */
       {0xFF, 2, 0, 1, 3, 5, 4, 0xFF},   /* 13: CCW,磁场CCW超前 [0x01→2,0x02→0,0x03→1,0x04→3,0x05→5,0x06→4] */
+      /* === 理论推导: 扇区±90° → 电压矢量 → step === */
+      {0xFF, 2, 0, 1, 4, 3, 5, 0xFF},   /* 14: 推导正转 [sector+90°, hall→step: 0x01→2,0x02→0,0x03→1,0x04→4,0x05→3,0x06→5] */
+      {0xFF, 5, 3, 4, 1, 0, 2, 0xFF},   /* 15: 推导反转 [sector-90°, hall→step: 0x01→5,0x02→3,0x03→4,0x04→1,0x05→0,0x06→2] */
   };
 
   /* Hall 回调: ISR 内调, 直接换相 */
@@ -246,15 +249,15 @@
                   COMM_STEP_UH_VL(COMM_PWM_FREQ_HZ, COMM_DUTY_PCT);
                   MAIN_D("[COMM] Mode=%d: OPEN-LOOP START", comm_mode);
               } else if (comm_mode == 3) {
-                  /* CW: 表12, 踢step+1 */
-                  hall_3ch_set_table(s_hall_handle, hall_tables[12]);
+                  /* CW: 表14, 扇区+90°正转 */
+                  hall_3ch_set_table(s_hall_handle, hall_tables[14]);
                   hall_3ch_start(s_hall_handle, HALL3_DIR_FORWARD);
-                  MAIN_D("[COMM] Mode=3: CW (table12)");
+                  MAIN_D("[COMM] Mode=3: CW (table14, sector+90)");
               } else if (comm_mode == 4) {
-                  /* CCW: 表12(同表), 踢step+5 */
-                  hall_3ch_set_table(s_hall_handle, hall_tables[12]);
+                  /* CCW: 表15, 扇区-90°反转 */
+                  hall_3ch_set_table(s_hall_handle, hall_tables[15]);
                   hall_3ch_start(s_hall_handle, HALL3_DIR_REVERSE);
-                  MAIN_D("[COMM] Mode=4: CCW (table12, rev kick)");
+                  MAIN_D("[COMM] Mode=4: CCW (table15, sector-90)");
               }
           }
 

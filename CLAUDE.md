@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Motor control system based on HC32F460 (Cortex-M4) with RS485/Modbus RTU communication. Controls DC motors with Hall sensor feedback, over-current/voltage detection, rotation angle limiting, and fault handling.
+Motor control system based on HC32F460 (Cortex-M4) with RS485/Modbus RTU communication. Supports DC motors (Hall sensor feedback, over-current/voltage detection, rotation angle limiting, fault handling) and BLDC motors (six-step trapezoidal commutation via SDH21263 gate driver, 3-Hall sensor closed-loop control).
 
-All source code lives under `ws_v.1.1/HC32F460_DDL_Rev3.3.0/`.
+All source code lives under `ws_v.2.1/HC32F460_DDL_Rev3.3.0/`.
 
 ## Build System
 
 - **Primary IDE:** Keil MDK (uVision 5)
-- **Project file:** `ws_v.1.1/HC32F460_DDL_Rev3.3.0/projects/ev_hc32f460_lqfp100_v2/template/MDK/template.uvprojx`
+- **Project file:** `ws_v.2.1/HC32F460_DDL_Rev3.3.0/projects/ev_hc32f460_lqfp100_v2/template/MDK/template.uvprojx`
 - **MCU:** HC32F460xE (512KB Flash) — linker script is `template/MDK/config/linker/HC32F460xE.sct`
 - **Debug probe:** JLink (Cortex-M4)
 - **Build output:** `template/MDK/output/debug/` (`.axf`, `.hex`, `.bin`, `.map`)
@@ -27,6 +27,7 @@ projects/ev_hc32f460_lqfp100_v2/
 ├── Dev/          # Device drivers (motor, ADC, hall, voltage, sensor, EventBus, DeviceManager)
 ├── Utils/        # Utilities (ring_buf, msg_queue, lock, param_manager, TickTimer)
 ├── RTT/          # SEGGER RTT debug output
+├── ws/           # BLDC 6-step commutation (dev_commutation, hall_sensor_3ch)
 └── template/
     ├── source/   # main.c, main.h, hc32f4xx_conf.h
     └── MDK/      # Keil project, startup, linker scripts, JLink config
@@ -137,22 +138,29 @@ Typical sequence: START (0x0001) → FWD (0x0011) → STOP (0x0002)
 
 ## Startup Initialization Sequence
 
-The startup flow in `main.c`:
+The startup flow in `main.c` (current BLDC-focused version):
 
 ```
-Hardware_Init()           → SysTick, TMR0 timers, AOS trigger chains, GPIO
-App_Comm_Init(&comm_cfg)  → 4-layer comm stack (RS485 + Modbus RTU)
-ESystem_Init()            → DeviceManager + EventBus + all 16 devices registered
-FaultHandler_Init()       → Subscribe to TOPIC_VOLTAGE_ALARM + TOPIC_CURRENT_ALARM
-TMR4_PWM_Config(&pwm_cfg) → TMR4 PWM at 50kHz, SYNC output, active-high
-EventBus_Enable()         → Unblock deferred publishes, replay queued events
+Hardware_Init()             → SysTick, TMR0 timers, AOS trigger chains, GPIO
+App_Comm_Init(&comm_cfg)    → 4-layer comm stack (RS485 + Modbus RTU, node_id=1, 9600 baud)
+// ESystem_Init()           → COMMENTED OUT — DeviceManager + 16 devices (disabled for BLDC testing)
+// FaultHandler_Init()      → COMMENTED OUT — EventBus fault subscriptions (disabled)
+TMR4_PWM_Config(&pwm_cfg)   → TMR4 PWM 50kHz, 3 channels (U/V/W) SYNC mode
+TMR4_PWM_StartOutput()      → Start PWM output
+Timer6_Timebase_Init/Start  → μs free-running timebase
+// Init coast: all 3 channels 98% SYNC (upper FETs ON → freewheel)
+hall_3ch_create(&hall_cfg)   → 3-Hall sensor on PA8/PA9/PA10, INT008-010
+EventBus_Enable()            → Unblock deferred publishes (needed even without ESystem)
 // Super loop:
 while (1) {
-    ESystem_MainLoop();   // DeviceManager update scheduling
-    App_Comm_Poll();      // Modbus frame processing
-    TMR4_PWM_SetDuty();   // PWM duty update
+    App_Comm_Poll();         → Modbus frame processing
+    // Mode switching (comm_mode 0-4): coast / open-loop FWD/REV / closed-loop CW/CCW
+    // Open-loop: timer-driven Commutation_Step() via commu_num
+    // Closed-loop: hall_3ch_update() for RPM + stall detection
 }
 ```
+
+**Note:** `ESystem_Init()` and `FaultHandler_Init()` are commented out in the current `main.c` — the BLDC commutation loop replaces the old DeviceManager-based motor control. The old DC motor control path (DeviceManager + dev_motor + rotation angle limiter) is preserved in the codebase but not active.
 
 `ESystem_Init()` is defined in `App/App_Motor_Project.c` and wires up all device instances, EventBus subscriptions, and callbacks.
 
@@ -172,7 +180,7 @@ while (1) {
 
 The motor has **two** PWM timer configurations:
 
-**TMR4 PWM (active in current `main.c`):** 50kHz center-aligned PWM on PB8/PB9 via `Adp/tmr4_pwm.c/h`. Configured with `TMR4_OUTPUT_SYNC` mode for external gate-driver IC with built-in dead-time. Set via `TMR4_PWM_SetDuty(2500)` for 25% duty in the super loop.
+**TMR4 PWM (active in current `main.c`):** 50kHz center-aligned PWM on 6 pins via `Adp/tmr4_pwm.c/h` — PB9(UH), PB8(UL), PB7(VH), PB6(VL), PB5(WH), PB4(WL). Three independent half-bridge channels, each runtime-switchable between SYNC (THROUGH) and COMPLEMENTARY (DEAD_TMR) modes for SDH21263 gate driver. Coast mode: all 3 channels at 98% SYNC.
 
 **TMRA_4 PWM (commented out in `main.c`, preserved as reference):** Edge-aligned PWM with 4 channels on PB6-PB9 (CH3/CH4 partially commented out in the stop path):
 
@@ -191,36 +199,100 @@ The motor has **two** PWM timer configurations:
 
 ### TMR4 PWM Driver (`Adp/tmr4_pwm.c/h`)
 
-TMR4 unit 3 (CM_TMR4_3) on PB8/PB9. Two output modes, configurable via a single struct:
+TMR4 unit 3 (CM_TMR4_3), 6 pins on GPIO func2: PB9(UH), PB8(UL), PB7(VH), PB6(VL), PB5(WH), PB4(WL). Three half-bridge channels, each independently configurable at runtime.
 
 ```c
-typedef struct {
-    tmr4_output_type_t output_type;    // TMR4_OUTPUT_COMPLEMENTARY or TMR4_OUTPUT_SYNC
-    uint16_t           freq_hz;        // PWM frequency in Hz
-    uint16_t           dead_time_ns;   // Dead-time in nanoseconds (complementary mode only)
-    bool               active_high;    // true = active high, false = active low
-} tmr4_pwm_config_t;
+typedef enum {
+    TMR4_CHANNEL_U = 0,    // PB9/PB8
+    TMR4_CHANNEL_V = 1,    // PB7/PB6
+    TMR4_CHANNEL_W = 2,    // PB5/PB4
+    TMR4_CHANNEL_COUNT = 3,
+} tmr4_channel_t;
 
-void TMR4_PWM_Config(const tmr4_pwm_config_t *cfg);
+typedef enum {
+    TMR4_MODE_COMPLEMENTARY = 0,  // DEAD_TMR PWM, H=invert(L) — both FETs OFF
+    TMR4_MODE_SYNC = 1,           // THROUGH PWM, H=L — FETs follow duty
+} tmr4_channel_mode_t;
+
+void TMR4_PWM_Config(const tmr4_pwm_config_t *cfg);       // Init all 3 channels
+void TMR4_PWM_SetChannelMode(tmr4_channel_t ch, tmr4_channel_mode_t mode, uint16_t duty);
+void TMR4_PWM_SetDuty(tmr4_channel_t ch, uint16_t duty);  // 0-10000 = 0.00%-100.00%
+void TMR4_PWM_SetDutyFloat(tmr4_channel_t ch, float pct); // 0.0-100.0
+void TMR4_PWM_SetFrequency(uint16_t freq_hz);              // Runtime frequency change
 void TMR4_PWM_StartOutput(void);
 void TMR4_PWM_StopOutput(void);
 void TMR4_PWM_EmergencyStop(void);
-void TMR4_PWM_SetDuty(uint16_t u16Duty);              // 0-10000 = 0.00%-100.00%
 ```
 
-**Output types and dead-time behavior:**
-
-| output_type | PWM mode | Dead-time | Use case |
-|---|---|---|---|
-| `COMPLEMENTARY` | `DEAD_TMR` | `dead_time_ns` → PDAR/PDBR | Direct MOSFET drive, or pre-driver IC without built-in dead-time |
-| `SYNC` | `THROUGH` | Ignored (hardware doesn't support) | External gate-driver IC with built-in dead-time, or optocoupler |
+**Per-channel mode behavior:**
+- **SYNC mode:** H=L, both follow duty cycle. With SDH21263: HIGH=upper FET ON, LOW=lower FET ON.
+- **COMPLEMENTARY mode:** H=invert(L) with dead-time. H≠L → SDH21263 interlock → both FETs OFF (floating phase).
 
 **Internals:**
 - Counter: `TMR4_MD_TRIANGLE` (center-aligned). Period formula: `PCLK1 / (freq_hz × 2)`.
-- Dead-time conversion: `ticks = dead_time_ns × PCLK1 / 1e9`. Reads PCLK1 via `CLK_GetBusClockFreq(CLK_BUS_PCLK1)` at Config time — immune to Sysclk.h macro changes.
-- Polarity: `active_high=true` → `OXH_HOLD_OXL_HOLD`, `false` → `OXH_INVT_OXL_INVT`.
-- SYNC mode OC configuration follows HC32 official example `timer4_pwm_through` (UH compare mode 0x225F, UL compare mode 0x2250_225F, buffer cond `PEAK`).
+- Dead-time: `ticks = dead_time_ns × PCLK1 / 1e9`. Reads PCLK1 via `CLK_GetBusClockFreq(CLK_BUS_PCLK1)` at Config time.
+- Shadow registers: All duty/mode writes go to shadow registers, transferred at counter PEAK for glitch-free 3-channel sync.
 - Reference: `F:/HC32F460_folder/HC32F460_DDL_Rev3.3.0/projects/ev_hc32f460_lqfp100_v2/examples/timer4/timer4_pwm_through/`
+
+### BLDC Six-Step Commutation (`ws/dev_commutation.c/h`)
+
+State table driver for trapezoidal BLDC commutation via SDH21263 pre-driver IC.
+
+```
+Step 0 (UH_VL): U=SYNC(duty%),  V=SYNC(2%),   W=COMP(50%)  → U→V current
+Step 1 (UH_WL): U=SYNC(duty%),  V=COMP(50%),  W=SYNC(2%)   → U→W current
+Step 2 (VH_WL): U=COMP(50%),   V=SYNC(duty%), W=SYNC(2%)   → V→W current
+Step 3 (VH_UL): U=SYNC(2%),    V=SYNC(duty%), W=COMP(50%)  → V→U current
+Step 4 (WH_UL): U=SYNC(2%),    V=COMP(50%),  W=SYNC(duty%) → W→U current
+Step 5 (WH_VL): U=COMP(50%),   V=SYNC(2%),   W=SYNC(duty%) → W→V current
+```
+
+- **SYNC(duty%):** active phase — H=L=pulse → upper FET PWM/torque
+- **SYNC(2%):** low-side return — nearly always LOW → lower FET conducts
+- **COMP(50%):** floating phase — H≠L → interlock → both FETs OFF
+
+Each step calls `TMR4_PWM_SetChannelMode()` for each of the 3 channels. Lazy-update: skips channels whose mode+duty haven't changed since the last step.
+
+```c
+void Commutation_Init(void);                                     // All 3 phases to COMP OFF
+void Commutation_Step(uint8_t state, uint16_t freq_hz, float duty_pct);  // state 0-5
+void Commutation_Stop(void);                                     // All phases to COMP OFF
+// Convenience macros:
+COMM_STEP_UH_VL(freq, duty)  // Step 0
+COMM_STEP_UH_WL(freq, duty)  // Step 1
+COMM_STEP_VH_WL(freq, duty)  // Step 2
+COMM_STEP_VH_UL(freq, duty)  // Step 3
+COMM_STEP_WH_UL(freq, duty)  // Step 4
+COMM_STEP_WH_VL(freq, duty)  // Step 5
+```
+
+### 3-Channel Hall Sensor (`ws/hall_sensor_3ch.c/h`)
+
+Three Hall sensors on GPIO EXINT (both edges): PA10(Hall U, INT009), PA9(Hall V, INT010), PA8(Hall W, INT008).
+
+**ISR flow:** Read 3 GPIOs → form 3-bit state (0b000-0b111) → debounce (50μs min interval + unchanged-state skip) → lookup `hall_to_step[state]` (0-5 step, 0xFF=fault) → call `on_step(step, dir)` callback which invokes `Commutation_Step`.
+
+**Hall state sequence (CW rotation):** `0x03 → 0x02 → 0x06 → 0x04 → 0x05 → 0x01 → 0x03`
+
+**Corrected Hall-to-step table (table index 12):**
+```
+hall_to_step[8] = {0xFF, 1, 5, 0, 3, 2, 4, 0xFF}
+//                 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07
+```
+Invalid states 0x00 and 0x07 → 0xFF (fault callback).
+
+**Alignment startup:** Apply `align_step` for `align_duration_ms` (pulls rotor to known position), then kick one step forward/reverse, then transition to RUNNING (ISR takes over).
+
+**RPM:** `60,000,000 / (avg_interval_us × pole_pairs × 6)` with 6-sample sliding window.
+
+**Operating modes** (set by `comm_mode` variable in `main.c`):
+| Mode | Description |
+|------|-------------|
+| 0 | Coast — all 3 phases 98% SYNC (all upper FETs → same potential → no current) |
+| 1 | Open-loop forward (timer-driven step sequence, ~333→667 RPM over 3s) |
+| 2 | Open-loop reverse |
+| 3 | Closed-loop CW (Hall ISR-driven, 500ms alignment startup) |
+| 4 | Closed-loop CCW (same table, opposite kick direction) |
 
 ### Motor Ramp Control
 
@@ -250,10 +322,12 @@ Correct interrupt names (no underscore between INT and number):
 |------|------|
 | `Adp/Pwm.c/h` | PWM driver with ramp (TMRA_4 channels) |
 | `Adp/Template_Pwm.c/h` | PWM HAL config helpers |
-| `Adp/tmr4_pwm.c/h` | TMR4 complementary PWM (standalone driver) |
+| `Adp/tmr4_pwm.c/h` | TMR4 3-channel PWM driver (per-channel SYNC/COMP mode switching, shadow registers) |
 | `Adp/Motor_hall.c/h` | Hall sensor driver: GPIO interrupts, RPM/direction calculation |
 | `Adp/Timer0_Unit1.c/h` | Timer0 unit 1 — timebase and timing |
 | `Adp/timer6_timebase.c/h` | TMR6 timebase — free-running μs counter for `tickTimer_GetCount()` |
+| `ws/dev_commutation.c/h` | BLDC 6-step commutation state machine (via SDH21263) |
+| `ws/hall_sensor_3ch.c/h` | 3-Hall sensor: ISR-driven state lookup, debounce, alignment startup, RPM |
 | `Dev/dev_motor.c/h` | Motor arbitrator: block/allow lists, direction arbitration, ramp callbacks |
 | `Dev/dev_motor_hall.c/h` | Device-layer wrapper for Hall sensor |
 | `Dev/dev_rturn.c/h` | Rotation angle limiter: angle integration, calibration, lock/release |
@@ -326,10 +400,11 @@ See `Utils/Params.h` for the full list of `REG_*` constants and `AppParamRecord_
 
 ## Documentation
 
-- `ws_v.1.1/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
-- `ws_v.1.1/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
-- `ws_v.1.1/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
-- `ws_v.1.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames for testing (`python modbus_test_cmds.py` to see examples)
+- `ws_v.2.1/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
+- `ws_v.2.1/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
+- `ws_v.2.1/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
+- `ws_v.2.1/六步方波.md` — BLDC six-step square wave commutation: SDH21263 pre-driver, TMR4 per-channel PWM, 3-Hall sensor, operating modes (Chinese)
+- `ws_v.2.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames for testing (`python modbus_test_cmds.py` to see examples)
 - `安全审查报告.md` — Security audit of the RS485/Modbus comm stack. Key findings:
   - **Critical:** Potential buffer overrun in `ModbusRTU_SendResponse` if `len >= 255` (CRC write at `raw[len]`/`raw[len+1]`). Current code paths keep `len ≤ 253` but lacks defensive bounds check.
   - **High:** `HAL_FrameParser` silently truncates frames > 256 bytes (acceptable for Modbus RTU max frame size).
