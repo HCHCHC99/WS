@@ -101,7 +101,7 @@
   static uint64_t s_ramp_start_time_us = 0;
   static uint32_t s_current_interval_us = 0;
   #define COMM_PWM_FREQ_HZ           50000UL
-  #define COMM_DUTY_PCT              50.0f
+  #define COMM_DUTY_PCT              80.0f
   /* 固定换相间隔, 无斜坡 */
   #define RAMP_START_INTERVAL_US   5000UL   /* 起步 ~667 RPM */
   #define RAMP_TARGET_INTERVAL_US  5000UL   /* 目标 ~667 RPM */

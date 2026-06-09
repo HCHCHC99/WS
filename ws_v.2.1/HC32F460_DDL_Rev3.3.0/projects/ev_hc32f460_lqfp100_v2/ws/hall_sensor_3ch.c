@@ -75,6 +75,14 @@ static hall_3ch_instance_t g_instances[MAX_INSTANCES] = {{{0}}};
 /* ISR 快速索引: eirq_ch → 实例指针 */
 static hall_3ch_instance_t *g_irq_map[3] = {NULL, NULL, NULL};
 
+/* Keil Watch 调试变量 (非 static, volatile) */
+volatile float    g_hall_rpm        = 0.0f;
+volatile uint8_t  g_hall_state      = 0;
+volatile uint8_t  g_hall_dir        = 0;
+volatile uint8_t  g_hall_running    = 0;
+volatile uint8_t  g_hall_stalled    = 0;
+volatile uint8_t  g_hall_last_step  = 0;
+
 /* ========== 内部声明 ========== */
 static void hall_common_handler(uint8_t ch);
 static void update_direction(hall_3ch_instance_t *inst, uint8_t step);
@@ -337,11 +345,15 @@ void hall_3ch_start(hall_3ch_handle_t h, hall3_direction_t dir)
     hall_3ch_instance_t *inst = (hall_3ch_instance_t *)h;
     if (!inst->valid) return;
 
-    inst->target_dir = dir;
+    inst->target_dir  = dir;
+    inst->stalled     = 0;
+
+    /* 初始化脉冲时间戳，防止 stall 检测从时间零点起算导致误报 */
+    inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
 
     /* 对齐: 给 align_step 通电 */
     inst->state = STATE_ALIGNING;
-    inst->align_start_time_us = Timer6_Timebase_GetTimestamp();
+    inst->align_start_time_us = inst->last_pulse_time_us;
 
     if (inst->config.on_step) {
         inst->config.on_step(inst->config.align_step, dir);
@@ -430,6 +442,14 @@ void hall_3ch_update(hall_3ch_handle_t h)
     default:
         break;
     }
+
+    /* 同步到 Keil Watch 调试变量 */
+    g_hall_rpm       = inst->filtered_rpm;
+    g_hall_state     = inst->state;
+    g_hall_dir       = (uint8_t)inst->current_dir;
+    g_hall_running   = (inst->state == STATE_RUNNING) ? 1 : 0;
+    g_hall_stalled   = inst->stalled;
+    g_hall_last_step = inst->last_step;
 }
 
 /* ========== 查询接口 ========== */
