@@ -197,10 +197,15 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* During alignment/idle: record state, don't commutate */
+    /* During alignment/idle: record state + pulse, don't commutate */
     if (inst->state != STATE_RUNNING) {
-        inst->last_hall_state = state;
+        inst->last_hall_state    = state;
+        inst->last_step          = step;
         inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
+        inst->pulse_counter++;
+        MAIN_D("[HALL] ch=%d raw=0x%02X step=%d int=%lu %s",
+               ch, state, step, interval_us,
+               (inst->state == STATE_ALIGNING) ? "ALIGN" : "IDLE");
         return;
     }
 
@@ -215,7 +220,19 @@ static void hall_common_handler(uint8_t ch)
         if (diff < 0) diff += 6;
         if (diff != 1 && diff != 5) {
             g_dbg_isr_baddiff++;
-            return;  /* Invalid jump ¡ª noise, don't update last_step */
+            MAIN_D("[HALL] BAD ch=%d Hall=0x%02X step=%d->%d diff=%d int=%lu",
+                   ch, state, old_step, step, diff, interval_us);
+            return;
+        }
+    }
+
+    /* Commutation detail (every 8 valid steps, before state update) */
+    {
+        uint8_t old = inst->last_step;
+        g_dbg_isr_valid++;
+        if ((g_dbg_isr_valid & 0x07u) == 0) {
+            MAIN_D("[HALL] COMM Hall=0x%02X step=%d->%d int=%lu",
+                   state, old, step, interval_us);
         }
     }
 
@@ -225,8 +242,6 @@ static void hall_common_handler(uint8_t ch)
     inst->last_pulse_interval_us = interval_us;
     inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
     inst->pulse_counter++;
-
-    g_dbg_isr_valid++;
 
     /* Commutation callback with timing */
     if (inst->config.on_step) {
@@ -404,6 +419,29 @@ void hall_3ch_update(hall_3ch_handle_t h)
     Timer6_Timebase_UpdateTimestamp();
     uint64_t now = Timer6_Timebase_GetTimestamp();
 
+    /* M-method RPM: pulse count over time window (all states) */
+    if (inst->state == STATE_RUNNING || inst->state == STATE_IDLE) {
+        uint32_t pulse_delta = inst->pulse_counter - inst->last_pulse_count;
+        uint64_t elapsed     = now - inst->last_rpm_update_us;
+
+        if (elapsed >= RPM_UPDATE_MIN_US && pulse_delta >= RPM_UPDATE_MIN_PULSES) {
+            float rpm = (float)pulse_delta * 60000000.0f
+                      / ((float)elapsed * (float)(inst->config.pole_pairs * 6u));
+            if (rpm > 100000.0f) rpm = 100000.0f;
+            inst->current_rpm = rpm;
+            update_rpm_filter(inst, rpm);
+            inst->last_pulse_count   = inst->pulse_counter;
+            inst->last_rpm_update_us = now;
+        } else if (elapsed > RPM_TIMEOUT_US) {
+            if (pulse_delta == 0) {
+                inst->current_rpm = 0.0f;
+                update_rpm_filter(inst, 0.0f);
+            }
+            inst->last_pulse_count   = inst->pulse_counter;
+            inst->last_rpm_update_us = now;
+        }
+    }
+
     switch (inst->state) {
 
     case STATE_ALIGNING: {
@@ -431,47 +469,7 @@ void hall_3ch_update(hall_3ch_handle_t h)
         break;
     }
 
-    case STATE_RUNNING: {
-        /* M-method RPM: pulse count over time window */
-        {
-            uint32_t pulse_delta = inst->pulse_counter - inst->last_pulse_count;
-            uint64_t elapsed     = now - inst->last_rpm_update_us;
-
-            if (elapsed >= RPM_UPDATE_MIN_US && pulse_delta >= RPM_UPDATE_MIN_PULSES) {
-                float rpm = (float)pulse_delta * 60000000.0f
-                          / ((float)elapsed * (float)(inst->config.pole_pairs * 6u));
-                if (rpm > 100000.0f) rpm = 100000.0f;
-                inst->current_rpm = rpm;
-                update_rpm_filter(inst, rpm);
-                inst->last_pulse_count   = inst->pulse_counter;
-                inst->last_rpm_update_us = now;
-            } else if (elapsed > RPM_TIMEOUT_US) {
-                if (pulse_delta == 0) {
-                    inst->current_rpm = 0.0f;
-                    update_rpm_filter(inst, 0.0f);
-                }
-                inst->last_pulse_count   = inst->pulse_counter;
-                inst->last_rpm_update_us = now;
-            }
-        }
-
-        /* RPM debug */
-        {
-            static uint32_t rpm_dbg_cnt = 0;
-            rpm_dbg_cnt++;
-            if ((rpm_dbg_cnt & 0x1FFu) == 0) {
-                MAIN_D("[HALL] RPM raw=%d filt=%d fire=%lu/%lu/%lu/%lu unch=%lu noise=%lu fault=%lu baddiff=%lu valid=%lu dtMax=%lu",
-                       (int)inst->current_rpm, (int)inst->filtered_rpm,
-                       (unsigned long)g_dbg_isr_fire,
-                       (unsigned long)g_dbg_fire_ch0,
-                       (unsigned long)g_dbg_fire_ch1,
-                       (unsigned long)g_dbg_fire_ch2,
-                       g_dbg_isr_unchanged, g_dbg_isr_noise,
-                       g_dbg_isr_fault, g_dbg_isr_baddiff, g_dbg_isr_valid,
-                       (unsigned long)g_dbg_isr_time_max);
-            }
-        }
-
+    case STATE_RUNNING:
         if (inst->config.stall_timeout_ms > 0) {
             uint64_t since_pulse = now - inst->last_pulse_time_us;
             if (since_pulse > (uint64_t)inst->config.stall_timeout_ms * 1000UL) {
@@ -480,12 +478,30 @@ void hall_3ch_update(hall_3ch_handle_t h)
             }
         }
         break;
-    }
 
     case STATE_FAULT:
     case STATE_IDLE:
     default:
         break;
+    }
+
+    /* RPM debug (all states) */
+    {
+        static uint32_t rpm_dbg_cnt = 0;
+        rpm_dbg_cnt++;
+        if ((rpm_dbg_cnt & 0x1FFu) == 0) {
+            MAIN_D("[HALL] RPM raw=%d filt=%d state=%d Hall=0x%02X step=%d fire=%lu/%lu/%lu/%lu unch=%lu noise=%lu fault=%lu baddiff=%lu valid=%lu dtMax=%lu",
+                   (int)inst->current_rpm, (int)inst->filtered_rpm,
+                   inst->state,
+                   inst->last_hall_state, inst->last_step,
+                   (unsigned long)g_dbg_isr_fire,
+                   (unsigned long)g_dbg_fire_ch0,
+                   (unsigned long)g_dbg_fire_ch1,
+                   (unsigned long)g_dbg_fire_ch2,
+                   g_dbg_isr_unchanged, g_dbg_isr_noise,
+                   g_dbg_isr_fault, g_dbg_isr_baddiff, g_dbg_isr_valid,
+                   (unsigned long)g_dbg_isr_time_max);
+        }
     }
 
     g_hall_rpm       = inst->filtered_rpm;
