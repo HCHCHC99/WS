@@ -6,17 +6,19 @@
 #include <string.h>
 
 /*=============================================================================
- * Hall-to-step lookup tables: CW and CCW are DIFFERENT, like reference code.
+ * Hall-to-step lookup tables.
  *
- * Physical Hall sequence (standard 120 deg placement):
- *   CW:  0x05 -> 0x01 -> 0x03 -> 0x02 -> 0x06 -> 0x04
- *   CCW: 0x04 -> 0x06 -> 0x02 -> 0x03 -> 0x01 -> 0x05
+ * Physical Hall sequence (measured on this motor):
+ *   CW:  0x02 -> 0x06 -> 0x04 -> 0x05 -> 0x01 -> 0x03  (decreasing sector#)
+ *   CCW: 0x01 -> 0x05 -> 0x04 -> 0x06 -> 0x02 -> 0x03  (increasing sector#)
  *
- * CW table: maps each Hall state to FORWARD commutation step
- * CCW table: maps each Hall state to REVERSE commutation step
+ * For this motor, CW = decreasing angle = needs sector-90deg (reverse_map).
+ * CCW = increasing angle = needs sector+90deg (forward_map).
+ * So CW mode uses reverse_map, CCW mode uses forward_map ¡ª they are SWAPPED
+ * relative to their names because of the motor's Hall mounting orientation.
  *=============================================================================*/
-static const uint8_t s_hall2step_cw[8]  = {0xFF, 2, 0, 1, 4, 3, 5, 0xFF};
-static const uint8_t s_hall2step_ccw[8] = {0xFF, 5, 3, 4, 1, 0, 2, 0xFF};
+static const uint8_t s_hall2step_cw[8]  = {0xFF, 5, 3, 4, 1, 0, 2, 0xFF};  /* reverse_map: sector -90deg */
+static const uint8_t s_hall2step_ccw[8] = {0xFF, 2, 0, 1, 4, 3, 5, 0xFF};  /* forward_map: sector +90deg */
 
 /*=============================================================================
  * State
