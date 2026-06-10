@@ -6,18 +6,31 @@
 #include <string.h>
 
 /*=============================================================================
- * 内部状态
+ * Hall-to-step lookup tables: CW and CCW are DIFFERENT, like reference code.
+ *
+ * Physical Hall sequence (standard 120 deg placement):
+ *   CW:  0x05 -> 0x01 -> 0x03 -> 0x02 -> 0x06 -> 0x04
+ *   CCW: 0x04 -> 0x06 -> 0x02 -> 0x03 -> 0x01 -> 0x05
+ *
+ * CW table: maps each Hall state to FORWARD commutation step
+ * CCW table: maps each Hall state to REVERSE commutation step
+ *=============================================================================*/
+static const uint8_t s_hall2step_cw[8]  = {0xFF, 2, 0, 1, 4, 3, 5, 0xFF};
+static const uint8_t s_hall2step_ccw[8] = {0xFF, 5, 3, 4, 1, 0, 2, 0xFF};
+
+/*=============================================================================
+ * State
  *=============================================================================*/
 static comm_runner_config_t s_cfg;
 static hall_3ch_handle_t    s_hall     = NULL;
 static comm_runner_mode_t   s_mode     = COMM_RUNNER_STOP;
 static float                s_duty     = 80.0f;
-static int                  s_comm_step = 0;         /* 当前换相步 0~5 */
-static int                  s_sub_phase = 0;         /* 0=开环强拖, 1=闭环 */
+static int                  s_comm_step = 0;
+static int                  s_sub_phase = 0;
 static uint8_t              s_initialized = 0;
-static volatile uint8_t      s_fault_pending = 0;  /* ISR 置位, Update 处理 */
+static volatile uint8_t     s_fault_pending = 0;
 
-/* 开环定时变量 (mode 1/2 恒速 & mode 3/4 飞启共用一套) */
+/* ��定时变量 (mode 1/2 恒� & mode 3/4 飞启共用��) */
 static uint64_t s_ol_ramp_start_us  = 0;
 static uint64_t s_ol_last_step_us   = 0;
 static uint32_t s_ol_interval_us    = 0;
@@ -26,7 +39,7 @@ static uint32_t s_ol_target_interval = 0;
 static uint32_t s_ol_ramp_duration_ms = 0;
 
 /*=============================================================================
- * Hall 回调 (ISR 上下文)
+ * Hall 回调 (ISR 上下�)
  *=============================================================================*/
 static void runner_on_hall_step(uint8_t step, hall3_direction_t dir)
 {
@@ -37,12 +50,12 @@ static void runner_on_hall_step(uint8_t step, hall3_direction_t dir)
 static void runner_on_hall_fault(uint8_t hall_state)
 {
     (void)hall_state;
-    /* ISR 上下文: 只置标志, 不执行停止 (避免 ISR 内大量寄存器操作 + 重入风险) */
+    /* ISR 上下�: ��标志, 不执行停� (避免 ISR 内大量寄存器操作 + 重入风险) */
     s_fault_pending = 1;
 }
 
 /*=============================================================================
- * 内部: 启动开环强拖 (mode 1/2 或 mode 3/4 飞启阶段共用)
+ * 内部: �动开�强拖 (mode 1/2 � mode 3/4 飞启阶�共�)
  *=============================================================================*/
 static void start_open_loop(uint32_t start_interval, uint32_t target_interval,
                             uint32_t ramp_ms, int dir_fw)
@@ -57,7 +70,7 @@ static void start_open_loop(uint32_t start_interval, uint32_t target_interval,
     s_ol_last_step_us  = s_ol_ramp_start_us;
 
     Commutation_Init();
-    /* 第一步: UH_VL */
+    /* ���: UH_VL */
     COMM_STEP_UH_VL(s_cfg.pwm_freq_hz, s_duty);
 
     if (dir_fw) {
@@ -70,14 +83,14 @@ static void start_open_loop(uint32_t start_interval, uint32_t target_interval,
 }
 
 /*=============================================================================
- * 内部: 开环斜坡计算 + 定时换相 (每 Update 调用)
+ * 内部: ��斜坡计算 + 定时换相 (� Update 调用)
  *=============================================================================*/
 static void open_loop_tick(uint64_t now, int dir_fw)
 {
     uint64_t ramp_elapsed = now - s_ol_ramp_start_us;
     uint64_t ramp_total   = (uint64_t)s_ol_ramp_duration_ms * 1000UL;
 
-    /* 线性斜坡 */
+    /* 线�斜� */
     if (ramp_elapsed < ramp_total) {
         s_ol_interval_us = s_ol_start_interval
             - (uint32_t)((s_ol_start_interval - s_ol_target_interval)
@@ -86,7 +99,7 @@ static void open_loop_tick(uint64_t now, int dir_fw)
         s_ol_interval_us = s_ol_target_interval;
     }
 
-    /* 到时间就换一步 */
+    /* 到时间就��� */
     if ((now - s_ol_last_step_us) >= s_ol_interval_us) {
         s_ol_last_step_us = now;
         if (dir_fw) {
@@ -99,7 +112,7 @@ static void open_loop_tick(uint64_t now, int dir_fw)
 }
 
 /*=============================================================================
- * 内部: 停止 -> 全至关断
+ * 内部: 停� -> 全至关断
  *=============================================================================*/
 static void do_stop(void)
 {
@@ -142,13 +155,13 @@ void CommRunner_Init(const comm_runner_config_t *cfg)
     Timer6_Timebase_Init();
     Timer6_Timebase_Start();
 
-    /* ---- 上电默认: 全高侧 ON (上管全通=刹车, 待机安全) ---- */
+    /* ---- 上电默�: 全高� ON (上�全�=刹车, 待机安全) ---- */
     for (ch = 0; ch < 3; ch++) {
         TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch, TMR4_MODE_SYNC, 98.0f);
     }
 
-    /* ---- Hall 传感器 ---- */
-    /* 覆写回调为 Runner 内部函数 */
+    /* ---- Hall 传感� ---- */
+    /* 覆写回调� Runner 内部函数 */
     s_cfg.hall_cfg.on_step  = runner_on_hall_step;
     s_cfg.hall_cfg.on_fault = runner_on_hall_fault;
     s_hall = hall_3ch_create(&s_cfg.hall_cfg);
@@ -229,8 +242,8 @@ void CommRunner_SetDuty(float duty_pct)
     if (duty_pct > 98.0f) duty_pct = 98.0f;
     s_duty = duty_pct;
 
-    /* 闭环模式下, 下次 Hall ISR 触发 on_step 时自然带新占空比 */
-    /* 开环模式下, 下次定时换相时带新占空比 */
+    /* ��模式�, 下� Hall ISR 触发 on_step 时自然带新占空比 */
+    /* ��模式�, 下�定时换相时带新占空� */
 }
 
 /*=============================================================================
@@ -242,13 +255,13 @@ float CommRunner_GetDuty(void)
 }
 
 /*=============================================================================
- * CommRunner_Update - 主循环 1ms 调用
+ * CommRunner_Update - 主循� 1ms 调用
  *=============================================================================*/
 void CommRunner_Update(void)
 {
     if (!s_initialized) return;
 
-    /* 处理 ISR 报告的 Hall 故障 (000/111) */
+    /* 处理 ISR 报告� Hall 故障 (000/111) */
     if (s_fault_pending) {
         s_fault_pending = 0;
         MAIN_D("[CommRunner] Hall fault, coast");
@@ -260,7 +273,7 @@ void CommRunner_Update(void)
 
     switch (s_mode) {
 
-    /* ---- 纯开环 (mode 1/2) ---- */
+    /* ---- ��� (mode 1/2) ---- */
     case COMM_RUNNER_OPEN_FW:
         open_loop_tick(now, 1);
         break;
@@ -269,24 +282,24 @@ void CommRunner_Update(void)
         open_loop_tick(now, 0);
         break;
 
-    /* ---- 飞启->闭环 (mode 3/4) ---- */
+    /* ---- 飞启->�� (mode 3/4) ---- */
     case COMM_RUNNER_CLOSED_FW:
     case COMM_RUNNER_CLOSED_RV: {
         int is_fw = (s_mode == COMM_RUNNER_CLOSED_FW);
 
         if (s_sub_phase == 0) {
-            /* === 阶段0: 开环强拖 + 斜坡 === */
+            /* === 阶�0: ��强拖 + 斜坡 === */
             open_loop_tick(now, is_fw);
 
-            /* 斜坡结束 -> 飞启切入闭环 */
+            /* 斜坡结束 -> 飞启切入�� */
             uint64_t ramp_elapsed = now - s_ol_ramp_start_us;
             uint64_t ramp_total   = (uint64_t)s_ol_ramp_duration_ms * 1000UL;
             if (ramp_elapsed >= ramp_total) {
                 if (is_fw) {
-                    hall_3ch_set_table(s_hall, s_cfg.hall_tables[s_cfg.hall_table_cw]);
+                    hall_3ch_set_table(s_hall, s_hall2step_cw);
                     hall_3ch_start_flying(s_hall, HALL3_DIR_FORWARD);
                 } else {
-                    hall_3ch_set_table(s_hall, s_cfg.hall_tables[s_cfg.hall_table_ccw]);
+                    hall_3ch_set_table(s_hall, s_hall2step_ccw);
                     hall_3ch_start_flying(s_hall, HALL3_DIR_REVERSE);
                 }
                 s_sub_phase = 1;
@@ -294,7 +307,7 @@ void CommRunner_Update(void)
                        is_fw ? "CW" : "CCW");
             }
         } else {
-            /* === 阶段1: 闭环运行 (Hall ISR 驱动换相) === */
+            /* === 阶�1: ��运� (Hall ISR 驱动换相) === */
             hall_3ch_update(s_hall);
             if (hall_3ch_is_stalled(s_hall)) {
                 MAIN_D("[CommRunner] Closed-loop stall, coast");
