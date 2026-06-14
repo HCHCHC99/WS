@@ -24,7 +24,7 @@
 #define COMM_DUTY_MAX_F  98.0f   /* 98% */
 #define COMM_DUTY_OFF_F  50.0f   /* 50% (complementary OFF) */
 
-/* Commutation step macros â€” freq_hz (e.g. 50000), duty_pct (e.g. 95.0f) */
+/* Commutation step macros â€ freq_hz (e.g. 50000), duty_pct (e.g. 95.0f) */
 #define COMM_STEP_UH_VL(f, d)  Commutation_Step(0, (f), (d))
 #define COMM_STEP_UH_WL(f, d)  Commutation_Step(1, (f), (d))
 #define COMM_STEP_VH_WL(f, d)  Commutation_Step(2, (f), (d))
@@ -40,5 +40,10 @@ void Commutation_Step(uint8_t state, uint16_t freq_hz, float duty_pct);
 
 /* All phases to complementary OFF */
 void Commutation_Stop(void);
+
+/* Step metadata for debug display */
+const char* Commutation_GetHighPhase(uint8_t step);   /* "UH"/"VH"/"WH" */
+const char* Commutation_GetLowPhase(uint8_t step);    /* "UL"/"VL"/"WL" */
+uint16_t    Commutation_GetFieldAngle(uint8_t step);  /* 0-360 degrees */
 
 #endif /* __DEV_COMMUTATION_H__ */

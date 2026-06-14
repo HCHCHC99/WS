@@ -24,6 +24,38 @@ static const uint8_t s_states[6][6] = {
     /* WH_VL */ { M_COMP, D_OFF, M_SYNC, D_MIN, M_SYNC, D_PWM },
 };
 
+/* Step metadata for debug display */
+static const struct {
+    const char *high;   /* "UH"/"VH"/"WH" */
+    const char *low;    /* "UL"/"VL"/"WL" */
+    uint16_t    angle;  /* field angle in degrees */
+} s_step_meta[6] = {
+    {"UH", "VL", 330},  /* Step 0: UH+VL */
+    {"UH", "WL",  30},  /* Step 1: UH+WL */
+    {"VH", "WL",  90},  /* Step 2: VH+WL */
+    {"VH", "UL", 150},  /* Step 3: VH+UL */
+    {"WH", "UL", 210},  /* Step 4: WH+UL */
+    {"WH", "VL", 270},  /* Step 5: WH+VL */
+};
+
+const char* Commutation_GetHighPhase(uint8_t step)
+{
+    if (step > 5) return "??";
+    return s_step_meta[step].high;
+}
+
+const char* Commutation_GetLowPhase(uint8_t step)
+{
+    if (step > 5) return "??";
+    return s_step_meta[step].low;
+}
+
+uint16_t Commutation_GetFieldAngle(uint8_t step)
+{
+    if (step > 5) return 0;
+    return s_step_meta[step].angle;
+}
+
 /* Per-channel change detection */
 static uint16_t s_last_freq     = 0U;
 static uint8_t  s_last_ch_mode[3] = {0xFFU, 0xFFU, 0xFFU};
@@ -91,18 +123,18 @@ void Commutation_Step(uint8_t state, uint16_t freq_hz, float duty_pct)
         }
 
         if (new_mode != s_last_ch_mode[ch]) {
-            /* Mode changed (SYNCâ†”COMP) â†’ full channel reinit */
+            /* Mode changed (SYNCâ†”COMP) â† full channel reinit */
             TMR4_PWM_SetChannelMode((tmr4_pwm_channel_t)ch,
                 (new_mode == M_COMP) ? TMR4_MODE_COMPLEMENTARY : TMR4_MODE_SYNC,
                 new_duty);
             s_last_ch_mode[ch] = new_mode;
             s_last_ch_duty[ch] = new_duty;
         } else if (dflag == D_PWM && new_duty != s_last_ch_duty[ch]) {
-            /* Same mode, active PWM channel, duty changed â†’ OCCR only (fast) */
+            /* Same mode, active PWM channel, duty changed â† OCCR only (fast) */
             TMR4_PWM_SetDutyFloat((tmr4_pwm_channel_t)ch, new_duty);
             s_last_ch_duty[ch] = new_duty;
         }
-        /* else: mode unchanged, duty unchanged, or non-PWM channel â†’ skip */
+        /* else: mode unchanged, duty unchanged, or non-PWM channel â† skip */
     }
 
     (void)state;

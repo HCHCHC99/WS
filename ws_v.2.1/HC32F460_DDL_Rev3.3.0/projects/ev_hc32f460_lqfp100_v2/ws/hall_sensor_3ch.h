@@ -60,4 +60,11 @@ hall3_direction_t hall_3ch_get_direction(hall_3ch_handle_t h);
 uint8_t           hall_3ch_is_running(hall_3ch_handle_t h);
 uint8_t           hall_3ch_is_stalled(hall_3ch_handle_t h);
 
+/* J-Scope HSS 波形监测 */
+extern volatile uint8_t g_scope_ha;     /* Hall A 电平 (0/1) */
+extern volatile uint8_t g_scope_hb;     /* Hall B 电平 (0/1) */
+extern volatile uint8_t g_scope_hc;     /* Hall C 电平 (0/1) */
+extern volatile uint8_t g_scope_step;   /* 当前换相步 (0-5) */
+extern volatile int16_t g_scope_rpm;    /* 滤波后转速 */
+
 #endif

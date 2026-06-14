@@ -1,4 +1,5 @@
 #include "hall_sensor_3ch.h"
+#include "dev_commutation.h"
 #include "timer6_timebase.h"
 #include "TickTimer.h"
 #include "hc32_ll_gpio.h"
@@ -14,6 +15,18 @@
 #define RPM_UPDATE_MIN_US      20000u
 #define RPM_UPDATE_MIN_PULSES  6u
 #define RPM_TIMEOUT_US         500000u
+
+/* Hall state (0x00-0x07) -> rotor electrical angle (degrees). -1 = invalid. */
+static const int16_t s_hall_to_angle[8] = {
+    -1,    /* 0x00: 000 invalid */
+     0,    /* 0x01: 001 */
+   240,    /* 0x02: 010 */
+   300,    /* 0x03: 011 */
+   120,    /* 0x04: 100 */
+    60,    /* 0x05: 101 */
+   180,    /* 0x06: 110 */
+    -1,    /* 0x07: 111 invalid */
+};
 
 /* ========== States ========== */
 enum {
@@ -70,6 +83,13 @@ volatile uint8_t  g_hall_dir        = 0;
 volatile uint8_t  g_hall_running    = 0;
 volatile uint8_t  g_hall_stalled    = 0;
 volatile uint8_t  g_hall_last_step  = 0;
+
+/* J-Scope HSS ²¨ÐÎ¼à²â */
+volatile uint8_t  g_scope_ha     = 0;
+volatile uint8_t  g_scope_hb     = 0;
+volatile uint8_t  g_scope_hc     = 0;
+volatile uint8_t  g_scope_step   = 0;
+volatile int16_t  g_scope_rpm    = 0;
 
 /* ISR debug counters */
 static volatile uint32_t g_dbg_isr_fire      = 0;
@@ -169,6 +189,9 @@ static void hall_common_handler(uint8_t ch)
 
     /* Read Hall state. Skip if unchanged (noise on same edge). */
     uint8_t state = read_hall_state_raw(inst);
+    g_scope_ha = (state >> 2) & 1;
+    g_scope_hb = (state >> 1) & 1;
+    g_scope_hc = state & 1;
     if (state == inst->last_hall_state) {
         g_dbg_isr_unchanged++;
         return;
@@ -203,8 +226,11 @@ static void hall_common_handler(uint8_t ch)
         inst->last_step          = step;
         inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
         inst->pulse_counter++;
-        MAIN_D("[HALL] ch=%d raw=0x%02X step=%d int=%lu %s",
-               ch, state, step, interval_us,
+        MAIN_D("[HALL] ch=%d A%d B%d C%d - %ddeg step=%d int=%luus %s",
+               ch,
+               (state >> 2) & 1, (state >> 1) & 1, state & 1,
+               (int)s_hall_to_angle[(state <= 7) ? state : 7],
+               step, interval_us,
                (inst->state == STATE_ALIGNING) ? "ALIGN" : "IDLE");
         return;
     }
@@ -220,25 +246,34 @@ static void hall_common_handler(uint8_t ch)
         if (diff < 0) diff += 6;
         if (diff != 1 && diff != 5) {
             g_dbg_isr_baddiff++;
-            MAIN_D("[HALL] BAD ch=%d Hall=0x%02X step=%d->%d diff=%d int=%lu",
-                   ch, state, old_step, step, diff, interval_us);
+            MAIN_D("[HALL] BAD ch=%d A%d B%d C%d - %ddeg step %d->%d diff=%d int=%luus",
+                   ch,
+                   (state >> 2) & 1, (state >> 1) & 1, state & 1,
+                   (int)s_hall_to_angle[(state <= 7) ? state : 7],
+                   (int)old_step, (int)step, (int)diff, interval_us);
             return;
         }
     }
 
-    /* Commutation detail (every 8 valid steps, before state update) */
+    /* Commutation detail (every valid step) */
     {
         uint8_t old = inst->last_step;
         g_dbg_isr_valid++;
-        if ((g_dbg_isr_valid & 0x07u) == 0) {
-            MAIN_D("[HALL] COMM Hall=0x%02X step=%d->%d int=%lu",
-                   state, old, step, interval_us);
-        }
+        MAIN_D("[HALL] COMM A%d B%d C%d - %ddeg %s: %s-%s(%ddeg) -> %s-%s(%ddeg) int=%luus",
+               (state >> 2) & 1, (state >> 1) & 1, state & 1,
+               (int)s_hall_to_angle[(state <= 7) ? state : 7],
+               (inst->target_dir == HALL3_DIR_FORWARD) ? "CW" : "CCW",
+               Commutation_GetHighPhase(old), Commutation_GetLowPhase(old),
+               (int)Commutation_GetFieldAngle(old),
+               Commutation_GetHighPhase(step), Commutation_GetLowPhase(step),
+               (int)Commutation_GetFieldAngle(step),
+               interval_us);
     }
 
     /* Update tracking state (after adjacency check passes) */
     inst->last_hall_state        = state;
     inst->last_step              = step;
+    g_scope_step                 = step;
     inst->last_pulse_interval_us = interval_us;
     inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
     inst->pulse_counter++;
@@ -485,15 +520,23 @@ void hall_3ch_update(hall_3ch_handle_t h)
         break;
     }
 
+#if 0
     /* RPM debug (all states) */
     {
         static uint32_t rpm_dbg_cnt = 0;
         rpm_dbg_cnt++;
         if ((rpm_dbg_cnt & 0x1FFu) == 0) {
-            MAIN_D("[HALL] RPM raw=%d filt=%d state=%d Hall=0x%02X step=%d fire=%lu/%lu/%lu/%lu unch=%lu noise=%lu fault=%lu baddiff=%lu valid=%lu dtMax=%lu",
+            const char *dir_str = (inst->target_dir == HALL3_DIR_FORWARD) ? "CW" :
+                                   (inst->target_dir == HALL3_DIR_REVERSE) ? "CCW" : "-";
+            uint8_t hs = inst->last_hall_state;
+            MAIN_D("[HALL] RPM raw=%d filt=%d A%d B%d C%d - %ddeg %s %s-%s(%ddeg) | fire=%lu/%lu/%lu/%lu unch=%lu noise=%lu fault=%lu baddiff=%lu valid=%lu dtMax=%lu",
                    (int)inst->current_rpm, (int)inst->filtered_rpm,
-                   inst->state,
-                   inst->last_hall_state, inst->last_step,
+                   (hs >> 2) & 1, (hs >> 1) & 1, hs & 1,
+                   (int)s_hall_to_angle[(hs <= 7) ? hs : 7],
+                   dir_str,
+                   Commutation_GetHighPhase(inst->last_step),
+                   Commutation_GetLowPhase(inst->last_step),
+                   (int)Commutation_GetFieldAngle(inst->last_step),
                    (unsigned long)g_dbg_isr_fire,
                    (unsigned long)g_dbg_fire_ch0,
                    (unsigned long)g_dbg_fire_ch1,
@@ -503,8 +546,10 @@ void hall_3ch_update(hall_3ch_handle_t h)
                    (unsigned long)g_dbg_isr_time_max);
         }
     }
+#endif
 
     g_hall_rpm       = inst->filtered_rpm;
+    g_scope_rpm      = (int16_t)inst->filtered_rpm;
     g_hall_state     = inst->state;
     g_hall_dir       = (uint8_t)inst->target_dir;
     g_hall_running   = (inst->state == STATE_RUNNING) ? 1 : 0;
