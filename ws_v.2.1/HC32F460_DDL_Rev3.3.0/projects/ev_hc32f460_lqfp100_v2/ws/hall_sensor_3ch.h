@@ -5,19 +5,19 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* ·½Ïò */
+/* ï¿½ï¿½ï¿½ï¿½ */
 typedef enum {
     HALL3_DIR_NONE = 0,
     HALL3_DIR_FORWARD,
     HALL3_DIR_REVERSE,
 } hall3_direction_t;
 
-/* »Øµ÷: Hall ´¥·¢»»ÏàÊ±µ÷ÓÃ, ISR ÄÚÖ´ÐÐ */
+/* ï¿½Øµï¿½: Hall ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½, ISR ï¿½ï¿½Ö´ï¿½ï¿½ */
 typedef void (*hall3_step_callback_t)(uint8_t step, hall3_direction_t dir);
-/* »Øµ÷: ¼ì²âµ½ 000/111 Ê±µ÷ÓÃ */
+/* ï¿½Øµï¿½: ï¿½ï¿½âµ½ 000/111 Ê±ï¿½ï¿½ï¿½ï¿½ */
 typedef void (*hall3_fault_callback_t)(uint8_t hall_state);
 
-/* ÅäÖÃ */
+/* ï¿½ï¿½ï¿½ï¿½ */
 typedef struct {
     uint8_t   port[3];           /* 0=U(PA10) 1=V(PA9) 2=W(PA8) */
     uint16_t  pin[3];
@@ -27,20 +27,20 @@ typedef struct {
     uint8_t   irq_priority;
 
     uint8_t   pole_pairs;
-    uint8_t   hall_to_step[8];   /* 3bit ×´Ì¬Âë ¡ú »»Ïà²½ 0~5, 0xFF=¹ÊÕÏ */
+    uint8_t   hall_to_step[8];   /* 3bit ×´Ì¬ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½à²½ 0~5, 0xFF=ï¿½ï¿½ï¿½ï¿½ */
 
-    hall3_step_callback_t  on_step;    /* ISR ÄÚµ÷ÓÃ */
-    hall3_fault_callback_t on_fault;   /* ISR ÄÚµ÷ÓÃ */
+    hall3_step_callback_t  on_step;    /* ISR ï¿½Úµï¿½ï¿½ï¿½ */
+    hall3_fault_callback_t on_fault;   /* ISR ï¿½Úµï¿½ï¿½ï¿½ */
 
-    /* ¶ÔÆëÆô¶¯ */
-    uint8_t   align_step;         /* ¶ÔÆëÓÃµÄ»»Ïà²½ */
-    float     align_duty_pct;     /* ¶ÔÆëÕ¼¿Õ±È */
-    uint16_t  align_duration_ms;  /* ¶ÔÆë³ÖÐøÊ±¼ä */
+    /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
+    uint8_t   align_step;         /* ï¿½ï¿½ï¿½ï¿½ï¿½ÃµÄ»ï¿½ï¿½à²½ */
+    float     align_duty_pct;     /* ï¿½ï¿½ï¿½ï¿½Õ¼ï¿½Õ±ï¿½ */
+    uint16_t  align_duration_ms;  /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ */
 
     uint16_t  stall_timeout_ms;
 } hall_3ch_config_t;
 
-/* ²»Í¸Ã÷¾ä±ú */
+/* ï¿½ï¿½Í¸ï¿½ï¿½ï¿½ï¿½ï¿½ */
 typedef struct hall_3ch_instance_t* hall_3ch_handle_t;
 
 /* API */
@@ -49,22 +49,27 @@ hall_3ch_handle_t hall_3ch_create(const hall_3ch_config_t *cfg);
 void              hall_3ch_destroy(hall_3ch_handle_t h);
 
 void              hall_3ch_start(hall_3ch_handle_t h, hall3_direction_t dir);
-void              hall_3ch_start_flying(hall_3ch_handle_t h, hall3_direction_t dir);  /* ·ÉÐÐÆô¶¯, Ìø¹ý¶ÔÆë */
-void              hall_3ch_stop(hall_3ch_handle_t h);    /* Í£, »Ø IDLE */
+void              hall_3ch_start_flying(hall_3ch_handle_t h, hall3_direction_t dir);  /* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
+void              hall_3ch_stop(hall_3ch_handle_t h);    /* Í£, ï¿½ï¿½ IDLE */
 void              hall_3ch_set_table(hall_3ch_handle_t h, const uint8_t table[8]);
 
-void              hall_3ch_update(hall_3ch_handle_t h);  /* Ö÷Ñ­»·¶¨Ê±µ÷ */
+void              hall_3ch_update(hall_3ch_handle_t h);  /* ï¿½ï¿½Ñ­ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ */
+
+uint8_t           hall_3ch_read_raw(hall_3ch_handle_t h); /* Read raw 3-bit Hall GPIO state directly.
+                                                             Works in any FSM state (IDLE/ALIGNING/RUNNING/FAULT).
+                                                             Returns 0b001-0b110 for valid states,
+                                                             0b000 or 0b111 for invalid. */
 
 float             hall_3ch_get_rpm(hall_3ch_handle_t h);
 hall3_direction_t hall_3ch_get_direction(hall_3ch_handle_t h);
 uint8_t           hall_3ch_is_running(hall_3ch_handle_t h);
 uint8_t           hall_3ch_is_stalled(hall_3ch_handle_t h);
 
-/* J-Scope HSS ²¨ÐÎ¼à²â */
-extern volatile uint8_t g_scope_ha;     /* Hall A µçÆ½ (0/1) */
-extern volatile uint8_t g_scope_hb;     /* Hall B µçÆ½ (0/1) */
-extern volatile uint8_t g_scope_hc;     /* Hall C µçÆ½ (0/1) */
-extern volatile uint8_t g_scope_step;   /* µ±Ç°»»Ïà²½ (0-5) */
-extern volatile int16_t g_scope_rpm;    /* ÂË²¨ºó×ªËÙ */
+/* J-Scope HSS ï¿½ï¿½ï¿½Î¼ï¿½ï¿½ */
+extern volatile uint8_t g_scope_ha;     /* Hall A ï¿½ï¿½Æ½ (0/1) */
+extern volatile uint8_t g_scope_hb;     /* Hall B ï¿½ï¿½Æ½ (0/1) */
+extern volatile uint8_t g_scope_hc;     /* Hall C ï¿½ï¿½Æ½ (0/1) */
+extern volatile uint8_t g_scope_step;   /* ï¿½ï¿½Ç°ï¿½ï¿½ï¿½à²½ (0-5) */
+extern volatile int16_t g_scope_rpm;    /* ï¿½Ë²ï¿½ï¿½ï¿½×ªï¿½ï¿½ */
 
 #endif

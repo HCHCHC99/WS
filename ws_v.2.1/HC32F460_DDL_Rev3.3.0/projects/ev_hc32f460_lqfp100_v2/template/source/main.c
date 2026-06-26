@@ -13,20 +13,20 @@
 #include "dev_comm_runner.h"
 
 /*=============================================================================
- * Keil Watch ��改变� (调试接口)
+ * Keil Watch ��改变� (调试接口)
  *=============================================================================*/
-volatile int   comm_mode        = 0;     /* 0=�, 1=��正转, 2=��反转, 3=��正转, 4=��反转 */
-volatile float g_comm_duty_pct  = 80.0f; /* 占空� 2%~98% */
+volatile int   comm_mode        = 0;     /* 0=Stop 1=OpenFW 2=OpenRV 3=ClosedFW 4=ClosedRV 5=Calibrate 6=CalibCW 7=CalibCCW */
+volatile float g_comm_duty_pct  = 80.0f; /* Duty cycle 2%~98% */
 
-/* � PWM 全局变量 (dev_motor 模块引用, 不可删除) */
+/* � PWM 全局变量 (dev_motor 模块引用, 不可删除) */
 pwm_t g_motor_pwm_ch1;
 pwm_t g_motor_pwm_ch2;
 pwm_t g_motor_pwm_ch3;
 pwm_t g_motor_pwm_ch4;
 
 /*=============================================================================
- * Hall 映射� (16� × 8�)
- *   0~5: 同� (霍尔+1=磁场CW)
+ * Hall 映射� (16� × 8�)
+ *   0~5: 同� (霍尔+1=磁场CW)
  *   6~11: 偏移 (霍尔+1=磁场CCW)
  *   12: 实测校准 CW
  *   13: CCW (磁场CCW超前)
@@ -35,10 +35,10 @@ pwm_t g_motor_pwm_ch4;
  *=============================================================================*/
 int main(void)
 {
-    /* ---- �件初始化 ---- */
+    /* ---- �件初始化 ---- */
     Hardware_Init();
 
-    /* ---- 通信� (RS485 + Modbus RTU) ---- */
+    /* ---- 通信� (RS485 + Modbus RTU) ---- */
     static const App_Comm_Config_t comm_cfg = {
         .phy.baudrate     = 9600,
         .phy.dir_polarity = 0,
@@ -58,7 +58,7 @@ int main(void)
     static const comm_runner_config_t runner_cfg = {
         .pwm_freq_hz       = 50000,
 
-        /* Hall 传感器配�: 3�, PA10=U, PA9=V, PA8=W, 3对极 */
+        /* Hall 传感器配�: 3�, PA10=U, PA9=V, PA8=W, 3对极 */
         .hall_cfg = {
             .port      = {GPIO_PORT_A, GPIO_PORT_A, GPIO_PORT_A},
             .pin       = {GPIO_PIN_10, GPIO_PIN_09, GPIO_PIN_08},
@@ -67,9 +67,9 @@ int main(void)
             .irq_src   = {INT_SRC_PORT_EIRQ10, INT_SRC_PORT_EIRQ9, INT_SRC_PORT_EIRQ8},
             .irq_priority = DDL_IRQ_PRIO_02,
             .pole_pairs   = 3,
-            /* 默��场对齐�: step0�0x01, 磁场正向 */
+            /* 默��场对齐�: step0�0x01, 磁场正向 */
             .hall_to_step = {0xFF,1,3,2,5,0,4,0xFF},
-            /* on_step/on_fault � CommRunner 内部覆写 */
+            /* on_step/on_fault � CommRunner 内部覆写 */
             .on_step      = NULL,
             .on_fault     = NULL,
             .align_step        = 0,
@@ -78,12 +78,12 @@ int main(void)
             .stall_timeout_ms  = 500,
         },
 
-        /* ��恒� (mode 1/2): 667 RPM 定� 3s 斜坡 */
+        /* ��恒� (mode 1/2): 667 RPM 定� 3s 斜坡 */
         .ol_const_start_us  = 5000,
         .ol_const_target_us = 5000,
         .ol_const_ramp_ms   = 3000,
 
-        /* 飞启�� (mode 3/4): 167�1111 RPM, 2s 斜坡 */
+        /* 飞启�� (mode 3/4): 167�1111 RPM, 2s 斜坡 */
         .ol_fly_start_us    = 20000,
         .ol_fly_target_us   = 3000,
         .ol_fly_ramp_ms     = 2000,
@@ -95,14 +95,14 @@ int main(void)
 
     EventBus_Enable();
 
-    /* ---- 主循� ---- */
+    /* ---- 主循� ---- */
     static int   s_prev_mode     = -1;
     static float s_prev_duty     = 80.0f;
 
     while (1) {
         App_Comm_Poll();
 
-        /* Keil Watch � CommRunner (调试�/Modbus 下发的模式切�) */
+        /* Keil Watch � CommRunner (调试�/Modbus 下发的模式切�) */
         if (comm_mode != s_prev_mode) {
             s_prev_mode = comm_mode;
             CommRunner_SetMode((comm_runner_mode_t)comm_mode);
@@ -112,10 +112,10 @@ int main(void)
             CommRunner_SetDuty(g_comm_duty_pct);
         }
 
-        /* 驱动换相状�机 */
+        /* 驱动换相状�机 */
         CommRunner_Update();
 
-        /* CommRunner � Keil Watch (堵转等内部触发的 STOP 同�回�) */
+        /* CommRunner � Keil Watch (堵转等内部触发的 STOP 同�回�) */
         {
             int actual = (int)CommRunner_GetMode();
             if (actual != comm_mode) {

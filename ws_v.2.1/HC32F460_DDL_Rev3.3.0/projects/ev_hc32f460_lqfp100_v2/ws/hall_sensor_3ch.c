@@ -84,7 +84,7 @@ volatile uint8_t  g_hall_running    = 0;
 volatile uint8_t  g_hall_stalled    = 0;
 volatile uint8_t  g_hall_last_step  = 0;
 
-/* J-Scope HSS ²¨ÐÎ¼à²â */
+/* J-Scope HSS ï¿½ï¿½ï¿½Î¼ï¿½ï¿½ */
 volatile uint8_t  g_scope_ha     = 0;
 volatile uint8_t  g_scope_hb     = 0;
 volatile uint8_t  g_scope_hc     = 0;
@@ -442,6 +442,14 @@ void hall_3ch_set_table(hall_3ch_handle_t h, const uint8_t table[8])
     MAIN_D("[HALL3] set_table: [%d,%d,%d,%d,%d,%d,%d,%d]",
            (int)table[0], (int)table[1], (int)table[2], (int)table[3],
            (int)table[4], (int)table[5], (int)table[6], (int)table[7]);
+}
+
+/* ========== Read raw Hall state direct from GPIO ========== */
+uint8_t hall_3ch_read_raw(hall_3ch_handle_t h)
+{
+    if (!h) return 0xFFu;
+    hall_3ch_instance_t *inst = (hall_3ch_instance_t *)h;
+    return read_hall_state_raw(inst);
 }
 
 /* ========== Periodic update (called from main loop) ========== */
