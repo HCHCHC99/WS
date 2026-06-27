@@ -27,7 +27,7 @@ projects/ev_hc32f460_lqfp100_v2/
 ├── Dev/          # Device drivers (motor, ADC, hall, voltage, sensor, EventBus, DeviceManager)
 ├── Utils/        # Utilities (ring_buf, msg_queue, lock, param_manager, TickTimer)
 ├── RTT/          # SEGGER RTT debug output
-├── ws/           # BLDC 6-step commutation (dev_commutation, hall_sensor_3ch)
+├── ws/           # BLDC 6-step commutation (dev_comm_runner, dev_commutation, hall_sensor_3ch)
 └── template/
     ├── source/   # main.c, main.h, hc32f4xx_conf.h
     └── MDK/      # Keil project, startup, linker scripts, JLink config
@@ -138,31 +138,157 @@ Typical sequence: START (0x0001) → FWD (0x0011) → STOP (0x0002)
 
 ## Startup Initialization Sequence
 
-The startup flow in `main.c` (current BLDC-focused version):
+The current `main.c` uses **CommRunner** as the central BLDC controller:
 
 ```
-Hardware_Init()             → SysTick, TMR0 timers, AOS trigger chains, GPIO
-App_Comm_Init(&comm_cfg)    → 4-layer comm stack (RS485 + Modbus RTU, node_id=1, 9600 baud)
-// ESystem_Init()           → COMMENTED OUT — DeviceManager + 16 devices (disabled for BLDC testing)
-// FaultHandler_Init()      → COMMENTED OUT — EventBus fault subscriptions (disabled)
-TMR4_PWM_Config(&pwm_cfg)   → TMR4 PWM 50kHz, 3 channels (U/V/W) SYNC mode
-TMR4_PWM_StartOutput()      → Start PWM output
-Timer6_Timebase_Init/Start  → μs free-running timebase
-// Init coast: all 3 channels 98% SYNC (upper FETs ON → freewheel)
-hall_3ch_create(&hall_cfg)   → 3-Hall sensor on PA8/PA9/PA10, INT008-010
-EventBus_Enable()            → Unblock deferred publishes (needed even without ESystem)
+Hardware_Init()                    → SysTick, TMR0 timers, AOS trigger chains, GPIO
+App_Comm_Init(&comm_cfg)           → 4-layer comm stack (RS485 + Modbus RTU, node_id=1, 9600 baud)
+CommRunner_Init(&runner_cfg)       → TMR4 PWM 50kHz + TMR6 timebase + 3-Hall sensor + coast init
+  ├── TMR4_PWM_Config()           → 3 channels (U/V/W), center-aligned, SYNC mode
+  ├── TMR4_PWM_StartOutput()      → Start PWM output
+  ├── Timer6_Timebase_Init/Start  → μs free-running timebase
+  ├── Power-on safe state: all 3 channels 98% SYNC (upper FETs ON = brake)
+  └── hall_3ch_create(&hall_cfg)  → 3-Hall sensor on PA8/PA9/PA10, INT008-010
+EventBus_Enable()                  → Unblock deferred publishes
+
 // Super loop:
 while (1) {
-    App_Comm_Poll();         → Modbus frame processing
-    // Mode switching (comm_mode 0-4): coast / open-loop FWD/REV / closed-loop CW/CCW
-    // Open-loop: timer-driven Commutation_Step() via commu_num
-    // Closed-loop: hall_3ch_update() for RPM + stall detection
+    App_Comm_Poll();               → Modbus frame processing
+    // Mode switching via Keil Watch variable `comm_mode`:
+    //   Set comm_mode = 0-7 → CommRunner_SetMode() handles transitions
+    CommRunner_Update();           → 1ms tick: open-loop timing, closed-loop RPM/stall, calibration
+    // Sync actual mode back to Keil Watch (e.g. stall-triggered STOP)
 }
 ```
 
-**Note:** `ESystem_Init()` and `FaultHandler_Init()` are commented out in the current `main.c` — the BLDC commutation loop replaces the old DeviceManager-based motor control. The old DC motor control path (DeviceManager + dev_motor + rotation angle limiter) is preserved in the codebase but not active.
+**Note:** The old DC motor control path (`ESystem_Init()` → DeviceManager + dev_motor + rotation angle limiter) and the old TMRA_4 PWM driver are **not referenced** in the current `main.c`. They are preserved in the codebase as legacy reference but are inactive. `EventBus_Enable()` IS still called in `main.c` (line 96) because `App_FaultHandler` subscribes to alarm topics — but FaultHandler is initialized internally through `App_Comm_Init()`, not directly in `main.c`. All active motor control goes through `CommRunner`.
 
-`ESystem_Init()` is defined in `App/App_Motor_Project.c` and wires up all device instances, EventBus subscriptions, and callbacks.
+## Supporting Infrastructure
+
+- **`Hardware_Init()`** (`Adp/Hardware.c`, 21KB): One-shot hardware init called at startup. Configures:
+  - Clock tree (HCLK, PCLK1, PCLK2, EXCLK) via `BSP_CLK_Init()`
+  - GPIO pin function muxing for all peripherals
+  - SysTick timer (1ms interrupt)
+  - TMR0 timers (unit1 for general timing, unit2 for ADC trigger)
+  - AOS trigger chains for synchronized ADC sampling
+  - PA6 ADC data processing available via `Pa6_Adc_Process()`
+
+- **`TickTimer`** (`Utils/TickTimer.h`): Provides `tickTimer_DelayMs()` for blocking delays during initialization. Uses SysTick counter.
+
+- **`App_Realtime`** (`App/App_Realtime.c/h`): Aggregates realtime sensor data (speed, angle, voltage, current, direction) into `g_RealTimeData` struct. Called by `App_Comm_OnReadReg()` to serve Modbus read requests for registers 0x2730–0x273F. Data is RAM-only, not persisted.
+
+- **Legacy PWM globals in `main.c`:** `g_motor_pwm_ch1-4` (type `pwm_t`) are declared in `main.c` and marked "do not delete" because the legacy `Dev/dev_motor.c` references them. They are functionally inert in the current BLDC code path but must remain for compilation.
+
+## GPIO Pinout — Motor Control Signals
+
+### Active BLDC (TMR4 PWM + 3-Hall)
+
+| GPIO | Func | Signal | Direction |
+|------|------|--------|-----------|
+| PB9 | TMR4_3 CH1 | UH (upper FET) | OUT |
+| PB8 | TMR4_3 CH1N | UL (lower FET) | OUT |
+| PB7 | TMR4_3 CH2 | VH | OUT |
+| PB6 | TMR4_3 CH2N | VL | OUT |
+| PB5 | TMR4_3 CH3 | WH | OUT |
+| PB4 | TMR4_3 CH3N | WL | OUT |
+| PA10 | EXTINT_CH09 | Hall U sensor | IN |
+| PA9 | EXTINT_CH10 | Hall V sensor | IN |
+| PA8 | EXTINT_CH08 | Hall W sensor | IN |
+
+### Communication
+
+| GPIO | Func | Signal | Direction |
+|------|------|--------|-----------|
+| PA03 | GPIO | RS485 DIR (TX/RX control) | OUT |
+| PA04 | USART4_TX | RS485 TX | OUT |
+| PA05 | USART4_RX | RS485 RX | IN |
+
+### Legacy DC Motor (TMRA_4 PWM + 2-Hall)
+
+| GPIO | Func | Signal | Direction |
+|------|------|--------|-----------|
+| PB6-PB9 | TMRA_4 | PWM Ch1-4 | OUT |
+| PA9 | EXTINT_CH10 | Hall A | IN |
+| PA10 | EXTINT_CH09 | Hall B | IN |
+| PC13 | GPIO | Positive power output | OUT |
+| PC14 | GPIO | Negative power output | OUT |
+| PB10 | GPIO | Test power 1 | OUT |
+| PA02 | GPIO | Test power 2 | OUT |
+| PA05 | ADC CH5 | Current sense | IN |
+| PA06 | ADC CH6 | Voltage sense | IN |
+
+## CommRunner — Central BLDC Commutation Controller
+
+`ws/dev_comm_runner.c/h` is the **sole active motor control path**. It encapsulates all commutation logic that was previously scattered in `main.c`:
+
+- **PWM:** TMR4 3-channel via `tmr4_pwm.c/h` (50kHz center-aligned, per-channel SYNC/COMP mode)
+- **Timebase:** TMR6 free-running μs counter via `timer6_timebase.c/h`
+- **Hall sensor:** 3-channel via `hall_sensor_3ch.c/h` (ISR-driven, debounce, step lookup, M-method RPM)
+- **Commutation:** 6-step state machine via `dev_commutation.c/h`
+- **Modes:** 8 modes (0-7) — coast, open-loop FW/RV, closed-loop FW/RV, calibrate, calibrated-CW, calibrated-CCW
+
+Key API:
+```c
+void CommRunner_Init(const comm_runner_config_t *cfg);   // One-shot init: PWM + Hall + timebase
+void CommRunner_SetMode(comm_runner_mode_t mode);         // Mode transition (handles stop/start/ramp)
+void CommRunner_Update(void);                             // Call every 1ms from main loop
+void CommRunner_SetDuty(float duty_pct);                  // Runtime duty change (2%-98%)
+float CommRunner_GetRPM(void);                            // Filtered RPM from Hall sensor
+uint8_t CommRunner_IsRunning(void);                       // Hall FSM in RUNNING state
+uint8_t CommRunner_IsStalled(void);                       // Stall detected
+```
+
+**Mode dispatch** (`CommRunner_SetMode`):
+| Mode | Enum | Behavior |
+|------|------|----------|
+| 0 | `COMM_RUNNER_STOP` | All 3 phases 98% SYNC (coast/brake) |
+| 1 | `COMM_RUNNER_OPEN_FW` | Open-loop forward, constant-speed ramp |
+| 2 | `COMM_RUNNER_OPEN_RV` | Open-loop reverse |
+| 3 | `COMM_RUNNER_CLOSED_FW` | Open-loop ramp → flying start → Hall ISR closed-loop CW |
+| 4 | `COMM_RUNNER_CLOSED_RV` | Open-loop ramp → flying start → Hall ISR closed-loop CCW |
+| 5 | `COMM_RUNNER_CALIB` | Auto-calibrate Hall-to-step 0° offset mapping |
+| 6 | `COMM_RUNNER_CALIB_CW` | 500ms open-loop → closed-loop CW using calibration table +5 |
+| 7 | `COMM_RUNNER_CALIB_CCW` | 500ms open-loop → closed-loop CCW using calibration table +2 |
+
+**Hard-coded Hall→Step tables** (in `dev_comm_runner.c`, based on this motor's measured Hall sequence):
+```c
+// CW closed-loop (sector -90°):
+s_hall2step_cw[8]  = {0xFF, 5, 3, 4, 1, 0, 2, 0xFF};
+// CCW closed-loop (sector +90°):
+s_hall2step_ccw[8] = {0xFF, 2, 0, 1, 4, 3, 5, 0xFF};
+```
+These are **constants** (no longer runtime-switchable via Keil Watch variables). The old `hall_table_cw`/`hall_table_ccw` variables and 16-table system in main.c have been removed.
+
+**Flying start** (modes 3/4/6/7): Two-phase state machine:
+1. **Phase 0** (`s_sub_phase=0`): Open-loop forced commutation with linear ramp over `ol_fly_ramp_ms` (default 2000ms). Interval ramps from `ol_fly_start_us` (20000μs, ~167 RPM) to `ol_fly_target_us` (3000μs, ~1111 RPM).
+2. **Phase 1** (`s_sub_phase=1`): Ramp complete → load direction-specific Hall table → `hall_3ch_start_flying()` reads current Hall GPIOs, looks up step, sets `last_step`, enters RUNNING directly. Hall ISR takes over. Stall detection triggers coast (mode 0).
+
+## Auto-Calibration (comm_mode = 5)
+
+Automatically derives the Hall→Step 0° offset mapping by running open-loop and recording which Hall state corresponds to which commutation step during event-driven edge detection:
+
+1. `calib_reset()`: Clear all accumulators, start open-loop at 5000μs/step, begin 500ms settling delay
+2. After settling: each Hall GPIO change (edge) records `pending_map[hall] = s_comm_step`
+3. When all 6 Hall states observed in one electrical cycle → validate bijection (one-to-one) and consistency vs reference cycle
+4. 12 valid cycles → `CALIB_SUCCESS`, `g_calib_table[1..6]` populated, motor stops
+5. 3-second timeout or errors → `CALIB_FAIL_*` with detailed error in `g_calib_error`
+
+**Derived tables** (for modes 6/7): `calib2step_cw[H] = (g_calib_table[H] + 5) % 6`, `calib2step_ccw[H] = (g_calib_table[H] + 2) % 6`. These offsets (+5, +2) are specific to this motor's Hall mounting orientation.
+
+**Keil Watch variables during calibration:**
+| Variable | Meaning |
+|----------|---------|
+| `g_calib_status` | 0=IDLE, 1=RUNNING, 2=SUCCESS, 3=TIMEOUT, 4=STALL, 5=MISSING, 6=DUPLICATE, 7=INVALID, 8=AMBIGUOUS |
+| `g_calib_table[1..6]` | Calibrated 0° offset mapping |
+| `g_calib_valid_cycles` | Completed valid cycles (target: 12) |
+| `g_calib_hall_seen[1..6]` | 1 = Hall state observed at least once |
+| `g_calib_error` | Error detail (hall_state bitmask, step_a, step_b) |
+
+**Runtime debug variables** (watchable/modifiable in Keil without recompiling):
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `comm_mode` | `volatile int` | 0 | Operating mode (0-7); set in Keil Watch to change modes |
+| `g_comm_duty_pct` | `volatile float` | 80.0 | PWM duty cycle for all modes |
 
 ## Important Constraints
 
@@ -182,20 +308,7 @@ The motor has **two** PWM timer configurations:
 
 **TMR4 PWM (active in current `main.c`):** 50kHz center-aligned PWM on 6 pins via `Adp/tmr4_pwm.c/h` — PB9(UH), PB8(UL), PB7(VH), PB6(VL), PB5(WH), PB4(WL). Three independent half-bridge channels, each runtime-switchable between SYNC (THROUGH) and COMPLEMENTARY (DEAD_TMR) modes for SDH21263 gate driver. Coast mode: all 3 channels at 98% SYNC.
 
-**TMRA_4 PWM (commented out in `main.c`, preserved as reference):** Edge-aligned PWM with 4 channels on PB6-PB9 (CH3/CH4 partially commented out in the stop path):
-
-| Channel | Pin | Active Polarity |
-|---------|-----|-----------------|
-| CH1 | PB6 | Low-active |
-| CH2 | PB7 | Low-active |
-| CH3 | PB8 | Low-active (partially disabled) |
-| CH4 | PB9 | Low-active (partially disabled) |
-
-- PWM frequency: configured via `PWM_Init()` (typically 20kHz)
-- Duty cycle range: 2%–98% (`MOTOR_DUTY_MIN`/`MOTOR_DUTY_MAX`)
-- Ramp time: 800ms (`MOTOR_RAMP_TIME_MS`) — uses `PWM_StartRamp_TargetFromStart()` for smooth speed changes
-- Stop polarity: CH1/CH3 high-active at 50%, CH2/CH4 low-active at 50% (balanced stop)
-- Run polarity: all channels low-active — uses `Motor_SetRunPolarity()` to switch from stop mode
+**TMRA_4 PWM (LEGACY — not referenced in current `main.c`, preserved as reference):** Edge-aligned PWM with 4 channels on PB6-PB9. This was used by the old DC motor control path (DeviceManager + dev_motor). The current BLDC code uses only TMR4 PWM.
 
 ### TMR4 PWM Driver (`Adp/tmr4_pwm.c/h`)
 
@@ -268,7 +381,7 @@ COMM_STEP_WH_VL(freq, duty)  // Step 5
 
 ### 3-Channel Hall Sensor (`ws/hall_sensor_3ch.c/h`)
 
-Three Hall sensors on GPIO EXINT (both edges): PA10(Hall U, INT009), PA9(Hall V, INT010), PA8(Hall W, INT008).
+Three Hall sensors on GPIO EXINT (both edges): PA10(Hall U, INT010), PA9(Hall V, INT009), PA8(Hall W, INT008).
 
 **ISR flow:** Read 3 GPIOs → form 3-bit state (0b000-0b111) → debounce (50μs min interval + unchanged-state skip) → lookup `hall_to_step[state]` (0-5 step, 0xFF=fault) → call `on_step(step, dir)` callback which invokes `Commutation_Step`.
 
@@ -288,57 +401,27 @@ Invalid states 0x00 and 0x07 → 0xFF (fault callback).
 2. **Dedup:** `last_pulse_id` prevents the same ISR interval from being added to the sliding window multiple times in successive `hall_3ch_update()` calls.
 3. **Outlier rejection:** Intervals deviating >4x from the current 6-sample moving average are discarded (motor inertia prevents instantaneous 4x speed changes).
 
-**Runtime Hall table calibration (16 tables in `hall_tables[16][8]`):**
+**Runtime Hall table:** The Hall→Step mapping tables are compile-time constants in `dev_comm_runner.c`. For runtime calibration, use comm_mode=5 which auto-derives the 0° offset table and stores it in `g_calib_table[]` — modes 6/7 then consume this table with fixed +5/+2 offsets. Modes 3/4/6/7 use a `comm_sub_phase` state machine (see CommRunner section above). The old 16-table system and `hall_table_cw`/`hall_table_ccw` variables have been removed.
 
-`main.c` contains 16 pre-computed Hall-to-step lookup tables. Mode 3 (CW) uses `hall_tables[hall_table_cw]`, mode 4 (CCW) uses `hall_tables[hall_table_ccw]`. Both indices are independently adjustable in Keil Watch — e.g., change `hall_table_cw=14` and `hall_table_ccw=15` to test CW/CCW without recompiling.
-
-| Index | Purpose |
-|-------|---------|
-| 0-5 | Synchronous alignment offsets 0-5 (magnetic field CW rotation) |
-| 6-11 | Reverse-direction tables (magnetic field CCW rotation) |
-| 12 | Empirically corrected CW table from open-loop test data |
-| 13 | Empirically corrected CCW table (opposite of 12) |
-| 14 | **Lead-angle forward** (sector+90° voltage vector) — **default** |
-| 15 | **Lead-angle reverse** (sector-90° voltage vector) |
-
-Table 12 was derived by running open-loop CW and recording which Hall state corresponds to which commutation step. Tables 14/15 apply a +90°/-90° phase advance for better torque at speed (field-oriented control approximation).
-
-The `hall_cfg.hall_to_step` initialization table (`{0xFF,1,3,2,5,0,4,0xFF}`) is only used during alignment startup. After alignment, `hall_3ch_set_table()` replaces it with the selected `hall_tables[index]` before transitioning to RUNNING state. The alignment table is a "cogging torque" alignment sequence; the runtime table is the actual commutation mapping.
-
-**Operating modes** (set by `comm_mode` variable in `main.c`):
-| Mode | Description |
-|------|-------------|
-| 0 | Coast — all 3 phases 98% SYNC (all upper FETs → same potential → no current) |
-| 1 | Open-loop forward (timer-driven step sequence, constant ~667 RPM) |
-| 2 | Open-loop reverse (same, reversed step direction) |
-| 3 | **Open-loop ramp → flying start CW** (2s ramp 167→1111 RPM → read Hall → skip alignment → closed-loop) |
-| 4 | **Open-loop ramp → flying start CCW** (same, reversed direction) |
-
-Mode 3/4 use a `comm_sub_phase` state machine:
-- **Phase 0** (`comm_sub_phase=0`): Open-loop forced commutation with linear ramp over `OL_RAMP_DURATION_MS` (2000ms). Interval ramps from `OL_START_INTERVAL_US` (20000μs, ~167 RPM) to `OL_TARGET_INTERVAL_US` (3000μs, ~1111 RPM). Uses `g_comm_duty_pct`.
-- **Phase 1** (`comm_sub_phase=1`): Ramp complete → `hall_3ch_start_flying()` reads current Hall GPIOs, looks up the corresponding commutation step, sets `last_step`, and enters RUNNING directly — **no alignment, no coast**. Mode 3 uses `hall_tables[hall_table_cw]`, mode 4 uses `hall_tables[hall_table_ccw]`. The Hall ISR takes over seamlessly. Stall detection triggers coast (mode 0).
-
-Modes 1/2 are pure open-loop with fixed 5000μs step interval (COMM_PWM_FREQ_HZ=50kHz). The ramp infrastructure (RAMP_START→RAMP_TARGET over RAMP_DURATION) is present but configured with start=target=5000μs (constant speed).
+**Operating modes:** See the CommRunner mode dispatch table above — modes 0-7 are dispatched via `CommRunner_SetMode()`.
 
 **Runtime Debug Variables** (modifiable in Keil Watch window without recompiling):
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `g_comm_duty_pct` | `volatile float` | 80.0 | PWM duty cycle for both open-loop and closed-loop commutation |
-| `hall_table_cw` | `volatile int` | 14 | Hall table selector for mode 3 (CW closed-loop) |
-| `hall_table_ccw` | `volatile int` | 15 | Hall table selector for mode 4 (CCW closed-loop) |
-| `comm_mode` | `volatile int` | 0 | Operating mode (0=coast, 1=open-loop FWD, 2=open-loop REV, 3=closed-loop CW, 4=closed-loop CCW) |
+| `comm_mode` | `volatile int` | 0 | Operating mode (0-7); set in Keil Watch to change modes |
+| `g_comm_duty_pct` | `volatile float` | 80.0 | PWM duty cycle for all modes (2%-98%) |
 
-The Hall sensor module also exports debug globals: `g_hall_rpm`, `g_hall_state`, `g_hall_dir`, `g_hall_running`, `g_hall_stalled`, `g_hall_last_step`.
+The Hall sensor module exports debug globals via `hall_sensor_3ch`: `g_hall_rpm`, `g_hall_state`, `g_hall_dir`, `g_hall_running`, `g_hall_stalled`, `g_hall_last_step`.
 
-### Motor Ramp Control
+### Motor Ramp Control (LEGACY — DC motor path, not active)
 
-Motor speed is controlled via `Motor_RampForward()`/`Motor_RampReverse()` in `Dev/dev_motor.c`. These `__weak` callbacks:
+Motor speed was controlled via `Motor_RampForward()`/`Motor_RampReverse()` in `Dev/dev_motor.c`. These `__weak` callbacks:
 1. Call `Motor_LimitDuty()` to clamp to 2%–98%
 2. Switch from stop polarity to run polarity via `Motor_SetRunPolarity()`
 3. Kick off a PWM ramp via `PWM_StartRamp_TargetFromStart()`
 4. On PWM ramp completion callback, set final duty via `Motor_SetRunDutyDirect()`
 
-### Hall Sensor (`Adp/Motor_hall.c/h`)
+### Hall Sensor (LEGACY — `Adp/Motor_hall.c/h`, DC motor path, not active)
 
 - Configuration: `motor_hall_config_t` struct with GPIO, interrupt, pole-pairs, and hall-count fields
 - Dual Hall sensors on PA9 (Hall A, EXTINT_CH09, INT009_IRQn) and PA10 (Hall B, EXTINT_CH10, INT010_IRQn)
@@ -356,21 +439,29 @@ Correct interrupt names (no underscore between INT and number):
 
 | File | Role |
 |------|------|
-| `Adp/Pwm.c/h` | PWM driver with ramp (TMRA_4 channels) |
-| `Adp/Template_Pwm.c/h` | PWM HAL config helpers |
-| `Adp/tmr4_pwm.c/h` | TMR4 3-channel PWM driver (per-channel SYNC/COMP mode switching, shadow registers) |
-| `Adp/Motor_hall.c/h` | Hall sensor driver: GPIO interrupts, RPM/direction calculation |
-| `Adp/Timer0_Unit1.c/h` | Timer0 unit 1 — timebase and timing |
-| `Adp/timer6_timebase.c/h` | TMR6 timebase — free-running μs counter for `tickTimer_GetCount()` |
+| `ws/dev_comm_runner.c/h` | **Central BLDC controller** — mode dispatch, open-loop/closed-loop/calibration state machines, Hall→Step tables |
 | `ws/dev_commutation.c/h` | BLDC 6-step commutation state machine (via SDH21263) |
-| `ws/hall_sensor_3ch.c/h` | 3-Hall sensor: ISR-driven state lookup, debounce, alignment startup, RPM |
-| `Dev/dev_motor.c/h` | Motor arbitrator: block/allow lists, direction arbitration, ramp callbacks |
-| `Dev/dev_motor_hall.c/h` | Device-layer wrapper for Hall sensor |
-| `Dev/dev_rturn.c/h` | Rotation angle limiter: angle integration, calibration, lock/release |
-| `App/App_Motor_Project.c/h` | Hardware pin definitions, device registration, simulation data |
+| `ws/hall_sensor_3ch.c/h` | 3-Hall sensor: ISR-driven state lookup, debounce, M-method RPM, J-Scope globals |
+| `Adp/tmr4_pwm.c/h` | TMR4 3-channel PWM driver (per-channel SYNC/COMP mode switching, shadow registers) |
+| `Adp/timer6_timebase.c/h` | TMR6 timebase — free-running μs counter |
+| `Adp/Hardware.c/h` | Clock tree, GPIO mux, SysTick, TMR0, AOS trigger chains |
+| `App/App_Comm.c/h` | Top-level comm app: Modbus callbacks, motor commands, Flash persistence |
+| `App/App_Realtime.c/h` | Realtime data aggregation (speed, angle, voltage, current) for Modbus reads |
+| `App/App_FaultHandler.c/h` | Fault detection: subscribes to voltage/current alarms, sets/clears fault bits |
+| `App/Protocol_ModbusRtu.c/h` | Modbus RTU protocol: CRC16, function codes 0x03/0x06/0x10 |
+| `Adp/Comm_HAL.c/h` | RS485 HAL: ring buffers, frame timeout, TX queue |
+| `Adp/rs485.c/h` | RS485 hardware: USART4 + PA03 direction pin + ISRs |
 | `Utils/Params.h` | Modbus register map definitions (REG_*) + Flash record layout (`AppParamRecord_t`) |
-| `Utils/rtt_manager.h` | Per-module debug macro switches (enable via uncommenting `#define` lines) |
+| `Utils/param_manager.c/h` | Flash-persisted parameter storage (wear-leveled, CRC32) |
+| `Utils/TickTimer.h` | Blocking delay utility via SysTick counter (`tickTimer_DelayMs()`) |
 | `RTT/rtt_log.h` | Central debug macros: `MAIN_D()`, `COMM_DBG()`, `HAL_DEBUG()` |
+| `Utils/rtt_manager.h` | Per-module debug macro switches |
+| `Dev/EventBus.c/h` | Publish/subscribe event system — used by App_FaultHandler for alarm topics; the broader DeviceManager integration is legacy |
+| `Dev/device_manager.c/h` | Device registry with time-sliced updates (legacy DC motor path) |
+| `Dev/dev_motor.c/h` | Motor arbitrator (legacy DC motor path) |
+| `Dev/dev_rturn.c/h` | Rotation angle limiter (legacy DC motor path) |
+| `Adp/Pwm.c/h` | TMRA_4 PWM driver (legacy DC motor path) |
+| `Adp/Motor_hall.c/h` | 2-Hall sensor driver (legacy DC motor path) |
 
 ### RTT Debug Switch Mechanism (`Utils/rtt_manager.h`)
 
@@ -384,7 +475,7 @@ Each module has a commented-out `#define MODULE_NAME` line. Uncomment to enable 
 
 Also provides `INTERVAL_DECLARE()` macro for rate-limited debug printing to avoid flooding the RTT channel at high frequencies.
 
-### Rotation Angle Limiting (`Dev/dev_rturn.c/h`)
+### Rotation Angle Limiting (LEGACY — `Dev/dev_rturn.c/h`, DC motor path, not active)
 
 Tracks motor rotation angle by integrating Hall sensor RPM over time. Blocks motor direction when limits are reached, publishes `TOPIC_RTURN_LIMIT`.
 
@@ -436,10 +527,12 @@ See `Utils/Params.h` for the full list of `REG_*` constants and `AppParamRecord_
 
 ## Documentation
 
+- `ws_v.2.1/六步方波.md` — BLDC six-step square wave commutation: hardware connections, Hall sequence, voltage vectors, ISR call chain, 5-layer noise defense, M-method RPM, debug prints, J-Scope variables (Chinese)
+- `ws_v.2.1/闭环校准说明.md` — Auto-calibration principle and process: event-driven edge detection, 0° vs 90° offset, calibration status codes, Hall fault diagnosis, derived closed-loop modes (Chinese)
+- `ws_v.2.1/角度30度90度分析.md` — Explains why both "30°" (app note style) and "90°" (code's style) are correct — they're two implementation perspectives on the same 90° torque-angle requirement
 - `ws_v.2.1/通信栈架构说明.md` — Full 4-layer communication stack explanation (Chinese)
 - `ws_v.2.1/电流控制逻辑说明.md` — Over-current detection flow, dual blocking, fault recovery (Chinese)
 - `ws_v.2.1/实时数据使用说明.md` — Real-time data register map and usage (Chinese)
-- `ws_v.2.1/六步方波.md` — BLDC six-step square wave commutation: SDH21263 pre-driver, TMR4 per-channel PWM, 3-Hall sensor, operating modes (Chinese)
 - `ws_v.2.1/modbus_test_cmds.py` — Generates Modbus RTU hex command frames for testing (`python modbus_test_cmds.py` to see examples)
 - `安全审查报告.md` — Security audit of the RS485/Modbus comm stack. Key findings:
   - **Critical:** Potential buffer overrun in `ModbusRTU_SendResponse` if `len >= 255` (CRC write at `raw[len]`/`raw[len+1]`). Current code paths keep `len ≤ 253` but lacks defensive bounds check.

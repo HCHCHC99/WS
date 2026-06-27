@@ -66,6 +66,9 @@ typedef struct hall_3ch_instance_t {
     hall3_direction_t  target_dir;
     uint64_t           align_start_time_us;
 
+    /* Display step: always ±1 per transition for clean J-Scope visualization */
+    uint8_t            display_step;
+
     /* Stall */
     volatile uint8_t  stalled;
 
@@ -175,6 +178,7 @@ static uint8_t read_hall_state_raw(const hall_3ch_instance_t *inst)
 }
 
 /* ========== Core ISR: minimal, like reference implementation ========== */
+/* ========== Core ISR: �Ƴ����д�ӡ��ȷ�����µ�ִ��Ч�� ========== */
 static void hall_common_handler(uint8_t ch)
 {
     hall_3ch_instance_t *inst = g_irq_map[ch];
@@ -207,7 +211,7 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* Look up commutation step from direction-specific table */
+    /* Look up commutation step */
     uint8_t step = inst->config.hall_to_step[state];
     if (step == 0xFFu) {
         g_dbg_isr_fault++;
@@ -220,71 +224,53 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* During alignment/idle: record state + pulse, don't commutate */
+    /* During alignment/idle: record state, still show step on J-Scope */
     if (inst->state != STATE_RUNNING) {
-        inst->last_hall_state    = state;
-        inst->last_step          = step;
+        inst->last_hall_state  = state;
+        inst->last_step        = step;
         inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
         inst->pulse_counter++;
-        MAIN_D("[HALL] ch=%d A%d B%d C%d - %ddeg step=%d int=%luus %s",
-               ch,
-               (state >> 2) & 1, (state >> 1) & 1, state & 1,
-               (int)s_hall_to_angle[(state <= 7) ? state : 7],
-               step, interval_us,
-               (inst->state == STATE_ALIGNING) ? "ALIGN" : "IDLE");
+        g_scope_step = step;  /* keep J-Scope step in sync with Hall state */
         return;
     }
 
-    /*
-     * Step adjacency check: new step must be adjacent to last step
-     * (diff=1 or diff=5). Rejects random noise that happens to look
-     * like a valid Hall state. Must run BEFORE last_step is updated.
-     */
+    /* Step adjacency check — diagnostic only.
+     * Do NOT reject: Hall sensor is the source of truth.
+     * If our internal last_step disagrees with the Hall sensor,
+     * we correct our state rather than discarding the Hall reading. */
     {
         uint8_t old_step = inst->last_step;
         int8_t diff = (int8_t)step - (int8_t)old_step;
         if (diff < 0) diff += 6;
         if (diff != 1 && diff != 5) {
             g_dbg_isr_baddiff++;
-            MAIN_D("[HALL] BAD ch=%d A%d B%d C%d - %ddeg step %d->%d diff=%d int=%luus",
-                   ch,
-                   (state >> 2) & 1, (state >> 1) & 1, state & 1,
-                   (int)s_hall_to_angle[(state <= 7) ? state : 7],
-                   (int)old_step, (int)step, (int)diff, interval_us);
-            return;
+            /* Continue — trust Hall unconditionally */
         }
     }
 
-    /* Commutation detail (every valid step) */
-    {
-        uint8_t old = inst->last_step;
-        g_dbg_isr_valid++;
-        MAIN_D("[HALL] COMM A%d B%d C%d - %ddeg %s: %s-%s(%ddeg) -> %s-%s(%ddeg) int=%luus",
-               (state >> 2) & 1, (state >> 1) & 1, state & 1,
-               (int)s_hall_to_angle[(state <= 7) ? state : 7],
-               (inst->target_dir == HALL3_DIR_FORWARD) ? "CW" : "CCW",
-               Commutation_GetHighPhase(old), Commutation_GetLowPhase(old),
-               (int)Commutation_GetFieldAngle(old),
-               Commutation_GetHighPhase(step), Commutation_GetLowPhase(step),
-               (int)Commutation_GetFieldAngle(step),
-               interval_us);
-    }
-
-    /* Update tracking state (after adjacency check passes) */
+    /* Update tracking state — always execute after Hall transition */
+    g_dbg_isr_valid++;
     inst->last_hall_state        = state;
     inst->last_step              = step;
-    g_scope_step                 = step;
     inst->last_pulse_interval_us = interval_us;
     inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
     inst->pulse_counter++;
 
-    /* Commutation callback with timing */
+    /* Normalized display step: always ±1 per transition (internal use) */
+    if (inst->target_dir == HALL3_DIR_FORWARD) {
+        inst->display_step = (inst->display_step + 1u) % 6u;
+    } else {
+        inst->display_step = (inst->display_step + 5u) % 6u;  /* -1 mod 6 */
+    }
+    /* J-Scope: show RAW step from Hall→Step table lookup */
+    g_scope_step = step;
+
+    /* Commutation callback (Keep this lean!) */
     if (inst->config.on_step) {
-        Timer6_Timebase_UpdateTimestamp();
         uint64_t t0 = Timer6_Timebase_GetTimestamp();
         inst->config.on_step(step, inst->target_dir);
-        Timer6_Timebase_UpdateTimestamp();
         uint64_t t1 = Timer6_Timebase_GetTimestamp();
+
         uint32_t dt = (t1 > t0) ? (uint32_t)(t1 - t0) : 0;
         g_dbg_isr_time_us = dt;
         if (dt > g_dbg_isr_time_max) {
@@ -369,6 +355,7 @@ void hall_3ch_start(hall_3ch_handle_t h, hall3_direction_t dir)
 
     inst->state = STATE_ALIGNING;
     inst->align_start_time_us = inst->last_pulse_time_us;
+    inst->display_step = inst->config.align_step;
 
     if (inst->config.on_step) {
         inst->config.on_step(inst->config.align_step, dir);
@@ -388,23 +375,27 @@ void hall_3ch_start_flying(hall_3ch_handle_t h, hall3_direction_t dir)
     inst->last_pulse_count   = inst->pulse_counter;
     inst->last_rpm_update_us = inst->last_pulse_time_us;
 
-    /* Read current Hall position */
+    /* Read current Hall position.
+     * Sample twice; if they differ the rotor is moving — use the latest reading.
+     * If still invalid, fall back to step 0 (safe default, first ISR will correct it). */
     uint8_t hall_state = read_hall_state_raw(inst);
     for (volatile int32_t _d = 0; _d < 100; _d++) { __NOP(); }
     uint8_t hall_state2 = read_hall_state_raw(inst);
 
     if (hall_state != hall_state2) {
-        hall_state = 0;
+        /* Rotor is moving between samples — use the latest reading */
+        hall_state = hall_state2;
     }
 
     uint8_t step = inst->config.hall_to_step[hall_state];
     if (step == 0xFFu) {
-        step = 0;
+        step = 0;  /* Invalid Hall code → safe default, first ISR corrects it */
     }
 
     inst->state           = STATE_RUNNING;
     inst->last_step       = step;
     inst->last_hall_state = hall_state;
+    inst->display_step    = step;
 
     (void)Timer6_Timebase_GetDelta();
 
@@ -504,6 +495,8 @@ void hall_3ch_update(hall_3ch_handle_t h)
             } else {
                 kick_step = (inst->config.align_step + 5) % 6;
             }
+
+            inst->display_step = kick_step;
 
             if (inst->config.on_step) {
                 inst->config.on_step(kick_step, inst->target_dir);
