@@ -54,6 +54,8 @@ typedef struct {
 extern volatile calib_status_t      g_calib_status;
 extern volatile calib_error_detail_t g_calib_error;
 extern volatile uint8_t  g_calib_table[8];             /* Hall_state -> step (0-offset); entries 0/7 = 0xFF */
+extern uint8_t  g_calib_cw_table[8];          /* Calib-derived CW table: = (g_calib_table + 5) % 6 (mode 6) */
+extern uint8_t  g_calib_ccw_table[8];         /* Calib-derived CCW table: = (g_calib_table + 2) % 6 (mode 7) */
 extern volatile uint8_t  g_calib_valid_cycles;         /* Completed valid electrical cycles */
 extern volatile uint8_t  g_calib_total_steps;          /* Total step transitions counted */
 extern volatile uint8_t  g_calib_cycle_confidence[6];  /* Majority %% per step in latest cycle */

@@ -120,6 +120,7 @@
         <SetRegEntry>
           <Number>0</Number>
           <Key>DLGUARM</Key>
+          <Name>萓?x</Name>
         </SetRegEntry>
         <SetRegEntry>
           <Number>0</Number>
@@ -355,6 +356,21 @@
           <count>11</count>
           <WinNumber>2</WinNumber>
           <ItemText>g_dbg_isr_fault</ItemText>
+        </Ww>
+        <Ww>
+          <count>12</count>
+          <WinNumber>2</WinNumber>
+          <ItemText>g_calib_table </ItemText>
+        </Ww>
+        <Ww>
+          <count>13</count>
+          <WinNumber>2</WinNumber>
+          <ItemText>g_calib_cw_table</ItemText>
+        </Ww>
+        <Ww>
+          <count>14</count>
+          <WinNumber>2</WinNumber>
+          <ItemText>g_calib_ccw_table</ItemText>
         </Ww>
       </WatchWindow2>
       <Tracepoint>
