@@ -49,9 +49,10 @@ typedef struct hall_3ch_instance_t {
 
     volatile uint8_t  last_hall_state;
     volatile uint8_t  last_step;
-    volatile uint32_t last_pulse_interval_us;
+    volatile uint32_t last_pulse_interval;
     volatile uint64_t last_pulse_time_us;
     volatile uint32_t pulse_counter;
+    volatile uint32_t last_counter;     /* per-instance, not shared across ISR channels */
 
     /* RPM: M-method (pulse count over time window) */
     volatile float    current_rpm;
@@ -191,27 +192,13 @@ static void hall_common_handler(uint8_t ch)
     else if (ch == 1) g_dbg_fire_ch1++;
     else g_dbg_fire_ch2++;
 
-    /* Read Hall state. Skip if unchanged (noise on same edge). */
+    /* Read Hall state and update J-Scope immediately */
     uint8_t state = read_hall_state_raw(inst);
     g_scope_ha = (state >> 2) & 1;
     g_scope_hb = (state >> 1) & 1;
     g_scope_hc = state & 1;
-    if (state == inst->last_hall_state) {
-        g_dbg_isr_unchanged++;
-        return;
-    }
 
-    /* GetDelta for interval measurement */
-    uint32_t interval = Timer6_Timebase_GetDelta();
-    uint32_t interval_us = Timer6_Timebase_DeltaToUs(interval);
-
-    /* Reject pulses shorter than 50us (noise/ringing) */
-    if (interval_us < MIN_PULSE_INTERVAL_US) {
-        g_dbg_isr_noise++;
-        return;
-    }
-
-    /* Look up commutation step */
+    /* Look up commutation step — as early as possible */
     uint8_t step = inst->config.hall_to_step[state];
     if (step == 0xFFu) {
         g_dbg_isr_fault++;
@@ -224,35 +211,44 @@ static void hall_common_handler(uint8_t ch)
         return;
     }
 
-    /* During alignment/idle: record state, still show step on J-Scope */
+    /* J-Scope step updated immediately after table lookup */
+    g_scope_step = step;
+
+    /* Raw delta for pulse tracking (inline, no division, per-instance) */
+    uint32_t counter = Timer6_Timebase_GetCounter();
+    uint32_t delta  = 0;
+    if (counter >= inst->last_counter) {
+        delta = counter - inst->last_counter;
+    } else {
+        delta = (65536u - inst->last_counter) + counter;
+    }
+    inst->last_counter = counter;
+
+    /* During alignment/idle: record state */
     if (inst->state != STATE_RUNNING) {
         inst->last_hall_state  = state;
         inst->last_step        = step;
         inst->last_pulse_time_us = Timer6_Timebase_GetTimestamp();
         inst->pulse_counter++;
-        g_scope_step = step;  /* keep J-Scope step in sync with Hall state */
         return;
     }
 
     /* Step adjacency check — diagnostic only.
-     * Do NOT reject: Hall sensor is the source of truth.
-     * If our internal last_step disagrees with the Hall sensor,
-     * we correct our state rather than discarding the Hall reading. */
+     * Hall sensor is the source of truth — always accept its reading. */
     {
         uint8_t old_step = inst->last_step;
         int8_t diff = (int8_t)step - (int8_t)old_step;
         if (diff < 0) diff += 6;
         if (diff != 1 && diff != 5) {
             g_dbg_isr_baddiff++;
-            /* Continue — trust Hall unconditionally */
         }
     }
 
-    /* Update tracking state — always execute after Hall transition */
+    /* Update tracking state */
     g_dbg_isr_valid++;
     inst->last_hall_state        = state;
     inst->last_step              = step;
-    inst->last_pulse_interval_us = interval_us;
+    inst->last_pulse_interval = delta;
     inst->last_pulse_time_us     = Timer6_Timebase_GetTimestamp();
     inst->pulse_counter++;
 
@@ -260,10 +256,8 @@ static void hall_common_handler(uint8_t ch)
     if (inst->target_dir == HALL3_DIR_FORWARD) {
         inst->display_step = (inst->display_step + 1u) % 6u;
     } else {
-        inst->display_step = (inst->display_step + 5u) % 6u;  /* -1 mod 6 */
+        inst->display_step = (inst->display_step + 5u) % 6u;
     }
-    /* J-Scope: show RAW step from Hall→Step table lookup */
-    g_scope_step = step;
 
     /* Commutation callback (Keep this lean!) */
     if (inst->config.on_step) {
